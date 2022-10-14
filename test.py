@@ -7,6 +7,7 @@ from utils.utils import *
 
 import mymodel
 from mymodel import *
+from view_pt import select_weight_file
 import cv2
 
 hyp = {'giou': 3.54,  # giou loss gain
@@ -148,7 +149,7 @@ def test(weights=None,
     print(('\n' + '%10s' * 4) % ('IOU', 'l', 'Giou-l', 'obj-l'))
     pbar = tqdm(enumerate(dataloader), total=len(dataloader))    
     for batch_i, (imgs, targets, paths, shapes) in pbar:
-        if batch_i == opt.nbatch: break
+        if batch_i == opt.num_batch: break
 
         imgs = imgs.to(device).float() / 256.0  # uint8 to float32, 0 - 255 to 0.0 - 1.0
         targets = targets.to(device)
@@ -191,22 +192,23 @@ def test(weights=None,
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(prog='test.py')
     parser.add_argument('-m', '--model', type=str, default='UltraNet_FixQ', help='model name')
-    parser.add_argument('-w', '--weights', type=str, default='test_best.pt', help='weights path')
-    parser.add_argument('--batch-size', type=int, default=16, help='size of each image batch')
+    parser.add_argument('-w', '--weight', default=None, help='weights path')
+    parser.add_argument('-bs', '--batch-size', type=int, default=16, help='size of each image batch')
     parser.add_argument('--img-size', type=int, default=320, help='inference size (pixels)')
     parser.add_argument('--device', default='', help='device id (i.e. 0 or 0,1) or cpu')
     parser.add_argument('--datapath', default='../dacsdc_dataset', help = 'test dataset path')
     parser.add_argument('--verbose', action='store_true', help = 'show predict value result')
     parser.add_argument('--save-pic', action='store_true', help = 'save predict output picture')
-    parser.add_argument('--nbatch', type=int, default='-1', help='number of batch run')
+    parser.add_argument('-nb', '--num-batch', type=int, default='-1', help='num of batchs to run, -1 for full dataset')
     opt = parser.parse_args()
     print(opt)
+    if opt.weight is None: opt.weight = select_weight_file()
 
     # Test
     res = test(
-            opt.weights,
+            opt.weight,
             opt.batch_size,
             opt.img_size,
             opt.model)
 
-    print(('%s %s.pt\niou %.4f, lsum %.4f, lobj %.4f, lcls %.4f')%(opt.model, opt.weights, *res))
+    print(('%s %s.pt\niou %.4f, lsum %.4f, lobj %.4f, lcls %.4f')%(opt.model, opt.weight, *res))

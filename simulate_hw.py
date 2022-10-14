@@ -5,7 +5,7 @@ import numpy as np
 
 from export_hls import ConvParam
 from mymodel import YOLOLayer
-from test import get_prebox, hyp, bbox_iou
+from test import get_prebox, hyp, bbox_iou, select_weight_file
 from torch.utils.data import DataLoader
 from utils.datasets import LoadImagesAndLabels
 
@@ -18,10 +18,10 @@ class QConvLayer:
         if self.conv.icol < x.shape[-1]: # maxpool
             assert self.conv.irow*2, self.conv.icol*2 == x.shape[2:]
             x = F.max_pool2d(x.float(), kernel_size = 2, stride = 2).to(dtype=torch.int64)
-        #print('convi', self.conv.n, x[0,0,:,0])
+        # print('convi', self.conv.n, x[0,0,:,0])
 
         x = F.conv2d(x, self.w, bias=None, stride=self.conv.s, padding=self.conv.p) # [N, OCH, OROW, OCOL]
-        #print('convo', self.conv.n, x[0,0,:,0])
+        # print('convo', self.conv.n, x[0,0,:,0])
         och = x.shape[1]
         if self.conv.inc is not None:
             inc_ch = self.conv.inc.reshape((1, och, 1, 1))
@@ -32,6 +32,7 @@ class QConvLayer:
             x += bias_ch
         
         if hasattr(self.conv, 'lshift'):
+            x += 1 << self.conv.lshift_T-1
             x >>= self.conv.lshift_T
         
         if hasattr(self.conv, 'obit'):
@@ -73,7 +74,8 @@ def testdataset(hwmodel):
     
     iou_sum = 0.0
     test_n = 0
-    for imgs, targets, paths, shapes in dataloader:
+    for batch_i, (imgs, targets, paths, shapes) in enumerate(dataloader):
+        if batch_i == opt.num_batch: break
         bn, _, height, width = imgs.shape  # batch size, channels, height, width
         test_n += bn
 
@@ -90,19 +92,20 @@ def testdataset(hwmodel):
             print('pbox_xywh', pre_box[p].numpy(), 'tbox_xywh', tbox[p].numpy(), 'iou %.4f'%ious[p].item())
     
         meaniou = iou_sum / test_n
-        # break
 
     print('iou', meaniou)
 
 if __name__=='__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('foldername', help='folder name in ./hls/, which contians model_param.pkl')
+    parser.add_argument('-w', '--weight', help='weight folder name in ./hls/, which contians model_param.pkl')
     parser.add_argument('--datapath', default='../dacsdc_dataset', help = 'test dataset path')
     parser.add_argument('-bs', '--batch-size', type=int, default=1, help = 'batch-size')
+    parser.add_argument('-nb', '--num-batch', type=int, default=1, help = 'num of batchs to run, -1 for full dataset')
     opt = parser.parse_args()
     print(opt)
+    if opt.weight is None: opt.weight = select_weight_file()
     
     x = torch.zeros([1,3,320,160], dtype=torch.int64)
-    hwmodel = HWModel(torch.load('hls/'+opt.foldername+'/model_param.pkl'))
+    hwmodel = HWModel(torch.load('hls/'+opt.weight+'/model_param.pkl'))
     
     testdataset(hwmodel)
