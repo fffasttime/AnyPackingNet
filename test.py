@@ -74,7 +74,7 @@ def bbox_iou(box1, box2):
 
     return iou
 
-def get_boxes(pred_boxes, pred_conf):
+def select_boxes(pred_boxes, pred_conf):
     n = pred_boxes.size(0)
     # pred_boxes = pred_boxes.view(n, -1, 4)
     # pred_conf = pred_conf.view(n, -1, 1)
@@ -87,6 +87,16 @@ def get_boxes(pred_boxes, pred_conf):
         p_boxes[i] = pred_boxes[i][index]
 
     return p_boxes
+
+def get_prebox(inf_out):
+    inf_out = inf_out.view(inf_out.shape[0], 6, -1) # bs, anchors, nw*nh*6
+    inf_out_t = torch.zeros_like(inf_out[:, 0, :])
+    for i in range(inf_out.shape[1]):
+        inf_out_t += inf_out[:, i, :]
+    inf_out_t = inf_out_t.view(inf_out_t.shape[0], -1, 6) / 6 # average anchors: box, conf
+
+    pre_box = select_boxes(inf_out_t[..., :4], inf_out_t[..., 4]) # get pbox by max conf
+    return pre_box
 
 def test(weights=None,
          batch_size=16,
@@ -152,14 +162,8 @@ def test(weights=None,
             if hasattr(model, 'hyp'):  # if model has loss hyperparameters
                 loss += compute_loss(train_out, targets, model)[1][:2].cpu()  # GIoU, obj
 
-            inf_out = inf_out.view(inf_out.shape[0], 6, -1) # bs, anchors, nw*nh*6
-            # ft = torch.cuda.FloatTensor if p[0].is_cuda else torch.Tensor
-            inf_out_t = torch.zeros_like(inf_out[:, 0, :])
-            for i in range(inf_out.shape[1]):
-               inf_out_t += inf_out[:, i, :]
-            inf_out_t = inf_out_t.view(inf_out_t.shape[0], -1, 6) / 6 # average anchors: box, conf
+            pre_box = get_prebox(inf_out) # anchor average, select max
 
-            pre_box = get_boxes(inf_out_t[..., :4], inf_out_t[..., 4])
             tbox = targets[..., 2:6] * torch.Tensor([width, height, width, height]).to(device)
 
             ious = bbox_iou(pre_box, tbox)

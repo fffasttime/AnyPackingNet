@@ -1,7 +1,7 @@
 import argparse
 import time
 from typing import Dict, List
-import torch    
+import torch
 import numpy as np
 import mymodel
 import sys
@@ -46,7 +46,7 @@ def write_hls_config(model_param, path):
         content += f'// conv_{n}\n'
         for k, v in name_mapping.items():
             if hasattr(conv_param, k): # e.g. conv_last has no incbit
-                content += f'#define CONV_{n}_{k} {getattr(conv_param, k)}\n'
+                content += f'#define CONV_{n}_{v} {getattr(conv_param, k)}\n'
         content += '\n'
     content += '#endif _CONFIG_H_'
 
@@ -102,8 +102,7 @@ def extract_model(in_shape):
 
             if isinstance(sub_module, QuantConv2d): # New quant
                 conv_cur.wbit = sub_module.bit
-                conv_cur.wstep = sub_module.step
-                conv_cur.w = sub_module.export_quant()
+                conv_cur.w, conv_cur.wstep = sub_module.export_quant() # wstep is not QuantConv2d.step becuause of alpha
 
             elif type(sub_module).__name__ == 'Conv2d_Q': # Old dorefa quant
                 conv_cur.wbit = sub_module.w_bit
@@ -168,7 +167,7 @@ def process_batchnorm(model_param):
     incbit = len(bit(inc)); biasbit = len(bit(bias))
     larger lshift is better, but MBIT+incbit<48
     '''
-    lshift = 8
+    lshift = 16
 
     for conv in model_param[:-1]:
         print(f'Process bn_{conv.n}, shape {conv.bn_w.shape},', end = ' ')
@@ -184,6 +183,7 @@ def process_batchnorm(model_param):
         T = lshift+conv.wbit+conv.abit-1
         conv.inc = np.round(inc_raw * 2**T).astype(np.int64)
         conv.bias = np.round(bias_raw * 2**T).astype(np.int64)
+        conv.lshift_T = T
         # Get bitlength
         bitlength = lambda x: 1 + int(np.abs(x).max()).bit_length()
         conv.incbit = bitlength(conv.inc)
@@ -192,9 +192,10 @@ def process_batchnorm(model_param):
     
     conv_last = model_param[-1] # process lastbias
     conv_last.inc = None
-    conv_last.bias = np.round(conv_last.convbias/(conv.wstep * conv.astep)).astype(np.int64)
+    conv_last.div = 1/(conv.wstep * conv.astep)
+    conv_last.bias = np.round(conv_last.convbias * conv_last.div).astype(np.int64)
     conv_last.biasbit = bitlength(conv_last.bias)
-    print(f'conv_last biasbit {conv_last.biasbit}')
+    print(f'conv_last biasbit {conv_last.biasbit}, div {conv_last.div}')
 
 def reorder_weight(model_param, layers_simd, layers_pe):
     '''reorder_weight(model_param)
@@ -312,8 +313,9 @@ if __name__=='__main__':
     model.load_state_dict(ptfile['model'])
 
     # processs
-    model_param = extract_model([1, 320, 160])
+    model_param = extract_model([1, 160, 320])
     process_batchnorm(model_param) # get bn param before write hls config
+    torch.save(model_param, dir_output + 'model_param.pkl')
     reorder_weight(model_param, simd_pe[:,0], simd_pe[:,1]) # get pe, simd param before write hls config
     write_hls_config(model_param, dir_output)
     write_hls_weights(model_param, dir_output)

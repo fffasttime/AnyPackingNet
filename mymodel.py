@@ -367,19 +367,14 @@ class UltraNet_FixQ(nn.Module):
 
     def forward(self, x):
         img_size = x.shape[-2:]
-        yolo_out, out = [], []
         
         x = self.layers(x)
-        x = self.yololayer(x, img_size)
-
-        yolo_out.append(x)
+        p = self.yololayer(x, img_size) # train: p; test: (io, p)
 
         if self.training:  # train
-            return yolo_out
+            return [p]
         else:  # test
-            io, p = zip(*yolo_out)  # inference output, training output
-            return torch.cat(io, 1), p
-        return x 
+            return p[0], (p[1],) # inference output, training output
 
     def fetch_arch_info(self):
         sum_bitops, sum_bita, sum_bitw, sum_dsps = 0, 0, 0, 0

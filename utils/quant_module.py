@@ -69,7 +69,7 @@ def _gauss_quantize_export(x, step, bit):
     alpha = x.std().item()
     step *= alpha
     y = torch.clamp(torch.round(x/step), -lvls, lvls-1)
-    return y.cpu().detach().int().numpy()
+    return y.cpu().detach().int().numpy(), step
 
 class _gauss_quantize_resclaed_step(torch.autograd.Function):
 
@@ -110,7 +110,8 @@ class HWGQ(nn.Module):
         lvls = float(2 ** self.bit - 1)
         clip_thr = self.step * lvls
         y = x.clamp(min=0.0, max=clip_thr)
-        return _hwgq.apply(y, self.step)
+        out = _hwgq.apply(y, self.step)
+        return out
 
 class ImageInputQ(nn.Module):
     '''
@@ -122,7 +123,8 @@ class ImageInputQ(nn.Module):
         self.step = 1/2**bit
 
     def forward(self, x):
-        return torch.floor(x/self.step) * self.step  # [!] There will be no gradient on x
+        out = torch.floor(x/self.step) * self.step  # [!] There will be no gradient on x
+        return out
 
 class QuantConv2d(nn.Conv2d):
 
@@ -190,11 +192,11 @@ class QuantActivConv2d(nn.Module):
         tmp = torch.tensor(self.filter_size * in_shape[-1] * in_shape[-2], dtype=torch.float)
         self.size_product.copy_(tmp)
         out = self.activ(input)
+        ## print('convi', torch.round(out[0,0,:,0]/self.activ.step).int())
+        ## wstd = self.conv.weight.std()
         out = self.conv(out)
+        ## print('convo', torch.round(out[0,0,:,0]/(self.activ.step*self.conv.step*wstd)).int())
         return out
-    
-    def export_quant(self):
-        return self.conv.export_quant() | self.activ.export_quant()
 
 
 class QuantActivLinear(nn.Module):
