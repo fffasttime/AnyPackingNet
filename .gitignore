@@ -1,0 +1,10 @@
+/.vscode
+__pycache__
+*.pt
+/test_result
+/train_log
+/weights/*
+/hls/*
+!/hls/config_simd_pe.txt
+localconfig.py
+/*.txt
