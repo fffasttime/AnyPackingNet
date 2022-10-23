@@ -220,10 +220,10 @@ def reorder_weight(model_param, layers_simd, layers_pe):
         assert conv.och%conv.pe == 0, f"conv_{conv.n}, och {conv.och}, pe {conv.pe}"
         assert conv.k*conv.ich%simd == 0, f"conv_{conv.n}, ich {conv.ich}, k {conv.k}, simd {conv.simd}"
 
-        if conv.n==0: # first layer is different
-            w = w.transpose(0, 2, 3, 1) # [och, kr, kc, ich]
-        else:
-            w = w.transpose(0, 3, 2, 1) # [och, kc, kr, ich]
+        # if conv.n==0: # first layer is different
+        #    w = w.transpose(0, 2, 3, 1) # [och, kr, kc, ich]
+        # else:
+        w = w.transpose(0, 3, 2, 1) # [och, kc, kr, ich]
 
         w = w.reshape(conv.och//conv.pe, conv.pe, conv.k, conv.k*conv.ich//simd, simd)
         w = w.transpose(1,2,0,3,4) # [pe, k, och/pe, k*ich/simd, simd]
@@ -298,6 +298,12 @@ def write_hls_weights(model_param, path):
     print('#endif', file=f)
     f.close()
 
+def adjust_weight(model_param):
+    special_wa_bit = ((5,6), (7,3)) # These packing can't quantize to -2**(wbit-1)
+    for conv in model_param:
+        if (conv.wbit, conv.abit) in special_wa_bit:
+            print(f'Adjust conv_{conv.n} wbit={conv.wbit}')
+            conv.w = np.maximum(conv.w, -2**(conv.wbit-1)+1)
 
 if __name__=='__main__':
     parser = argparse.ArgumentParser()
@@ -318,8 +324,10 @@ if __name__=='__main__':
 
     # processs
     model_param = extract_model([1, 160, 320])
+    adjust_weight(model_param)
     process_batchnorm(model_param) # get bn param before write hls config
     torch.save(model_param, dir_output + 'model_param.pkl')
+    
     reorder_weight(model_param, simd_pe[:,0], simd_pe[:,1]) # get pe, simd param before write hls config
     write_hls_config(model_param, dir_output)
     write_hls_weights(model_param, dir_output)
