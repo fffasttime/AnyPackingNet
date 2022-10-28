@@ -7,7 +7,8 @@ from export_hls import ConvParam
 from mymodel import YOLOLayer
 from test import get_prebox, hyp, bbox_iou, select_weight_file
 from torch.utils.data import DataLoader
-from utils.datasets import LoadImagesAndLabels
+
+from datasets import LoadImagesAndLabels
 
 class QConvLayer:
     def __init__(self, conv_param):
@@ -98,7 +99,7 @@ def testdataset(hwmodel):
 if __name__=='__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-w', '--weight', help='weight folder name in ./hls/, which contians model_param.pkl')
-    parser.add_argument('--datapath', default='../dacsdc_dataset', help = 'test dataset path')
+    parser.add_argument('--datapath', default='../../dacsdc_dataset', help = 'test dataset path')
     parser.add_argument('-bs', '--batch-size', type=int, default=1, help = 'batch-size')
     parser.add_argument('-nb', '--num-batch', type=int, default=1, help = 'num of batchs to run, -1 for full dataset')
     opt = parser.parse_args()

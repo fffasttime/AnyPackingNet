@@ -3,13 +3,15 @@ import time
 from typing import Dict, List
 import torch
 import numpy as np
-import mymodel
 import sys
 import os
 
-from view_pt import select_weight_file
-from utils.quant_dorefa import activation_quantize_fn
-from utils.quant_module import HWGQ, QuantConv2d, ImageInputQ
+import sys
+sys.path.append('..')
+import mymodel
+from utils.view_pt import select_weight_file
+from quant_dorefa import activation_quantize_fn
+from anypacking.quant_module import HWGQ, QuantConv2d, ImageInputQ
 
 class ConvParam: ...
 

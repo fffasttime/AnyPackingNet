@@ -3,8 +3,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.init as init
-from utils.quant_dorefa import conv2d_Q_fn, activation_quantize_fn
-import utils.quant_module as qm
+from quant_dorefa import conv2d_Q_fn, activation_quantize_fn
+import anypacking.quant_module as qm
 
 def create_grids(self, img_size=416, ng=(13, 13), device='cpu', type=torch.float32):
     nx, ny = ng  # x and y grid size

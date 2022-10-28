@@ -3,11 +3,14 @@ import argparse
 import torch.distributed as dist
 import torch.optim as optim
 import torch.optim.lr_scheduler as lr_scheduler
+import time
 
+import sys
+sys.path.append('..')
 import localconfig
 import test
-from utils.datasets import *
-from utils.utils import *
+from datasets import *
+from yolo_utils import *
 
 from mymodel import *
 
@@ -59,7 +62,7 @@ def train():
     results_file = 'result_%s.txt'%opt.name
 
     # Initialize model
-    model = UltraNet_MixQ(opt.share_weight).to(device)
+    model = UltraNet_FixQ(opt.bitw, opt.bita).to(device)
 
     # Optimizer
     pg0, pg1, pg2 = [], [], []  # optimizer parameter groups
@@ -74,20 +77,11 @@ def train():
     if opt.adam:
         # hyp['lr0'] *= 0.1  # reduce lr (i.e. SGD=5E-3, Adam=5E-4)
         optimizer = optim.Adam(pg0, lr=hyp['lr0'])
-        # optimizer = AdaBound(pg0, lr=hyp['lr0'], final_lr=0.1)
     else:
         optimizer = optim.SGD(pg0, lr=hyp['lr0'], momentum=hyp['momentum'], nesterov=True)
     optimizer.add_param_group({'params': pg1, 'weight_decay': hyp['weight_decay']})  # add pg1 with weight_decay
     optimizer.add_param_group({'params': pg2})  # add pg2 (biases)
     optimizer.param_groups[2]['lr'] *= 2.0  # bias lr
-
-    # arch_optimizer
-    alpha_params = []
-    for name, param in model.named_parameters():
-        if 'alpha' in name:
-            alpha_params += [param]
-    arch_optimizer = torch.optim.SGD(alpha_params, opt.lra, momentum=hyp['momentum'],
-                               weight_decay=hyp['weight_decay'])
 
     del pg0, pg1, pg2
 
@@ -126,9 +120,6 @@ def train():
     lf = lambda x: (1 + math.cos(x * math.pi / epochs)) / 2 * 0.99 + 0.01  # cosine https://arxiv.org/pdf/1812.01187.pdf
     scheduler = lr_scheduler.LambdaLR(optimizer, lr_lambda=lf)
     scheduler.last_epoch = start_epoch
-
-    arch_scheduler = lr_scheduler.LambdaLR(arch_optimizer, lr_lambda=lf)
-    arch_scheduler.last_epoch = start_epoch
 
     # Initialize distributed training
     if device.type != 'cpu' and torch.cuda.device_count() > 1 and torch.distributed.is_available():
@@ -177,7 +168,6 @@ def train():
     model.arc = opt.arc  # attach yolo architecture
     model.hyp = hyp  # attach hyperparameters to model
     model.class_weights = labels_to_class_weights(dataset.labels, nc).to(device)  # attach class weights
-    maps = np.zeros(nc)  # mAP per class
     # torch.autograd.set_detect_anomaly(True)
     results = (0, 0, 0, 0, 0, 0, 0)  # 'P', 'R', 'mAP', 'F1', 'val GIoU', 'val Objectness', 'val Classification'
     t0 = time.time()
@@ -185,6 +175,13 @@ def train():
     print('Using %g dataloader workers' % nw)
     print('Starting training for %g epochs...' % epochs)
 
+    test.test(batch_size=batch_size,
+                                img_size=img_size_test,
+                                model=model,
+                                dataloader=testloader) # make forward
+    bops, bita, bitw, dsps = model.fetch_arch_info()
+    print('model with bops: {:.3f}M, bita: {:.3f}K, bitw: {:.3f}M, dsps: {:.3f}M'.format(bops, bita, bitw, dsps))
+            
     for epoch in range(start_epoch, epochs):  # epoch ------------------------------------------------------------------
         model.train()
         model.gr = 1 - (1 + math.cos(min(epoch * 2, epochs) * math.pi / epochs)) / 2  # GIoU <-> 1.0 loss ratio
@@ -202,10 +199,6 @@ def train():
             optimizer.param_groups[2]['lr'] = ps[0]
             if optimizer.param_groups[2].get('momentum') is not None:  # for SGD but not Adam
                 optimizer.param_groups[2]['momentum'] = ps[1]
-
-        curr_lr = optimizer.param_groups[0]['lr']
-        curr_lra = arch_optimizer.param_groups[0]['lr']
-        print(f'lr:{curr_lr}, lra:{curr_lra}')
 
         mloss = torch.zeros(4).to(device)  # mean losses
         print(('\n' + '%10s' * 8) % ('Epoch', 'gpu_mem', 'iouloss', 'objloss', 'triou', 'mloss', 'targets', 'img_size'))
@@ -227,23 +220,12 @@ def train():
             # Scale loss by nominal batch_size of 64
             loss *= 0.25
 
-            # complexity penalty
-            if opt.complexity_decay != 0:
-                if hasattr(model, 'module'):
-                    loss_complexity = opt.complexity_decay * model.module.complexity_loss()
-                else:
-                    loss_complexity = opt.complexity_decay * model.complexity_loss()
-                loss += loss_complexity
-            
             loss.backward()
 
             # Optimize accumulated gradient
             if ni % accumulate == 0:
                 optimizer.step()
-                arch_optimizer.step()
                 optimizer.zero_grad()
-                arch_optimizer.zero_grad()
-
             # Print batch results
             mloss = (mloss * i + loss_items) / (i + 1)  # update mean losses
             mem = '%.3gG' % (torch.cuda.memory_cached() / 1E9 if torch.cuda.is_available() else 0)  # (GB)
@@ -251,22 +233,9 @@ def train():
             pbar.set_description(s)
 
             # end batch ------------------------------------------------------------------------------------------------
-
-        print('========= architecture =========')
-        if hasattr(model, 'module'):
-            best_arch, bitops, bita, bitw, mixbitops, mixbita, mixbitw, dsps, mixdsps = model.module.fetch_best_arch()
-        else:
-            best_arch, bitops, bita, bitw, mixbitops, mixbita, mixbitw, dsps, mixdsps  = model.fetch_best_arch()
-        print('best model with bitops: {:.3f}M, bita: {:.3f}K, bitw: {:.3f}M, dsps: {:.3f}M'.format(
-            bitops, bita, bitw, dsps))
-        print('expected model with bitops: {:.3f}M, bita: {:.3f}K, bitw: {:.3f}M, dsps: {:.3f}M'.format(
-            mixbitops, mixbita, mixbitw, mixdsps))
-        print(f'best_weight: {best_arch["best_weight"]}')
-        print(f'best_activ: {best_arch["best_activ"]}')
-            
+        
         # Update scheduler
         scheduler.step()
-        arch_scheduler.step()
 
         # Process epoch results
         final_epoch = epoch + 1 == epochs
@@ -297,6 +266,7 @@ def train():
                          'model': model.module.state_dict() if type(
                              model) is nn.parallel.DistributedDataParallel else model.state_dict(),
                          'optimizer': None if final_epoch else optimizer.state_dict(),
+                         'model_params':model.model_params, # arch param
                          'extra': {'time': time.ctime(), 'name': opt.name}}
 
             # Save last checkpoint
@@ -322,7 +292,7 @@ def train():
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--epochs', type=int, default=35)  # 500200 batches at bs 16, 117263 COCO images = 273 epochs
+    parser.add_argument('--epochs', type=int, default=200)  # 500200 batches at bs 16, 117263 COCO images = 273 epochs
     parser.add_argument('--batch-size', type=int, default=64)  # effective bs = batch_size * accumulate = 16 * 4 = 64
     parser.add_argument('--accumulate', type=int, default=1, help='batches to accumulate before optimizing')
     parser.add_argument('--cfg', type=str, default='cfg/yolov3-tiny-1cls_1.cfg', help='*.cfg path')
@@ -339,11 +309,10 @@ if __name__ == '__main__':
     parser.add_argument('--device', default='', help='device id (i.e. 0 or 0,1 or cpu)')
     parser.add_argument('--adam', action='store_true', help='use adam optimizer')
     parser.add_argument('--single-cls', action='store_true', help='train as single-class dataset')
+    parser.add_argument('--bitw', type=str, default='')
+    parser.add_argument('--bita', type=str, default='')
     parser.add_argument('--var', type=float, help='debug variable')
-    parser.add_argument('--complexity-decay', '--cd', default=0, type=float, metavar='W', help='complexity decay (default: 0)')
-    parser.add_argument('--lra', '--learning-rate-alpha', default=0.01, type=float, metavar='LR', help='initial alpha learning rate')
-    parser.add_argument('--share-weight', action='store_true', help='share weight quantization')
-    
+  
     opt = parser.parse_args()
     last = wdir + 'last_%s.pt'%opt.name
     opt.weights = last if opt.resume else opt.weights

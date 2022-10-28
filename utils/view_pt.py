@@ -7,6 +7,9 @@ import os
 
 def select_weight_file():
     files = glob.glob('weights/*.pt')
+    if len(files) == 0:
+        print('[Error] No pt file found in current folder')
+        exit(1)
     for i, s in enumerate(files):
         print('', i, s)
     sel = int(input('Select one .pt file (0-%d): '%(len(files)-1)))
