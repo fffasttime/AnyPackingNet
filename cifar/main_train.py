@@ -14,8 +14,8 @@ sys.path.append('..')
 
 from localconfig import data_path
 import models
-from utils import torch_utils
 from test_acc import test
+from utils import torch_utils
  
 transform_train = transforms.Compose([
     transforms.RandomCrop(32, padding=4),
@@ -33,7 +33,7 @@ classes = ('plane', 'car', 'bird', 'cat',
 def train():
     torch_utils.init_seeds()
 
-    model = getattr(models, opt.model)()
+    model = models.VGG_tiny_FixQ(bitw = opt.bitw, bita = opt.bita)
     model.to(device)
 
     results_file = 'results/%s.txt'%opt.name
@@ -49,6 +49,10 @@ def train():
     train_loader = torch.utils.data.DataLoader(trainset, batch_size=opt.batch_size, shuffle=True, num_workers=2)
     test_best_acc = 0.0
 
+    test(model, device)
+    bops, bita, bitw, dsps = model.fetch_arch_info()
+    print('model with bops: {:.3f}M, bita: {:.3f}K, bitw: {:.3f}M, dsps: {:.3f}M'.format(bops, bita, bitw, dsps))
+    
     for epoch in range(start_epoch, epochs):
         model.train()
         mloss = macc = 0.
@@ -85,6 +89,7 @@ def train():
                             'model': model.module.state_dict() if type(
                                 model) is nn.parallel.DistributedDataParallel else model.state_dict(),
                             'optimizer': None if final_epoch else optimizer.state_dict(),
+                            'model_params': model.model_params, # arch param
                             'extra': {'time': time.ctime(), 'name': opt.name}}
             # Save last checkpoint
             torch.save(chkpt, wdir + '%s_last.pt'%opt.name)
@@ -99,11 +104,12 @@ def train():
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--epochs', type=int, default=40) 
-    parser.add_argument('--device', default='', help='device id (i.e. 0 or 0,1 or cpu)')
     parser.add_argument('--batch-size', type=int, default=128) 
+    parser.add_argument('--device', default='', help='device id (i.e. 0 or 0,1 or cpu)')
     parser.add_argument('--lr', type=float, default=0.1)
-    parser.add_argument('--model', type=str, default='VGG_tiny')
-    parser.add_argument('--name', default='', help='result and weight file name')
+    parser.add_argument('--name', default='VGG_tiny_FixQ', help='result and weight file name')
+    parser.add_argument('--bitw', type=str, default='')
+    parser.add_argument('--bita', type=str, default='')
 
     opt = parser.parse_args()
     print(opt)

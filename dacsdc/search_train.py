@@ -70,7 +70,7 @@ def train():
             pg2 += [v]  # biases
         elif 'Conv2d.weight' in k:
             pg1 += [v]  # apply weight_decay
-        else:
+        elif 'alpha' not in k:
             pg0 += [v]  # all else
 
     if opt.adam:

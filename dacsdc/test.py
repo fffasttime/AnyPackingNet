@@ -12,6 +12,8 @@ from mymodel import *
 from utils.view_pt import select_weight_file
 import cv2
 
+opt=None
+
 hyp = {'giou': 3.54,  # giou loss gain
        'cls': 37.4,  # cls loss gain
        'cls_pw': 1.0,  # cls BCELoss positive_weight
@@ -105,7 +107,8 @@ def test(weights=None,
          batch_size=16,
          img_size=416,
          model=None,
-         dataloader=None):
+         dataloader=None,
+         num_batch=-1):
     # Initialize/load model and set device
     if model is None or type(model)==str:
         device = torch_utils.select_device(opt.device, batch_size=batch_size)
@@ -151,7 +154,7 @@ def test(weights=None,
     print(('\n' + '%10s' * 4) % ('IOU', 'l', 'Giou-l', 'obj-l'))
     pbar = tqdm(enumerate(dataloader), total=len(dataloader))    
     for batch_i, (imgs, targets, paths, shapes) in pbar:
-        if batch_i == opt.num_batch: break
+        if batch_i == num_batch: break
 
         imgs = imgs.to(device).float() / 256.0  # uint8 to float32, 0 - 255 to 0.0 - 1.0
         targets = targets.to(device)
@@ -177,12 +180,12 @@ def test(weights=None,
             s = (('%10.4f')*4+'%10d') % (iou, loss_o.sum(), loss_o[0], loss_o[1], len(targets))
 
 
-            if opt.verbose:
+            if opt and opt.verbose:
                 np.set_printoptions(precision = 2)
                 for p in range(len(imgs)):
                     print(paths[p], 'pbox_xywh', pre_box[p].numpy(), 'tbox_xywh', tbox[p].numpy())
 
-            if opt.save_pic:
+            if opt and opt.save_pic:
                 for p in range(len(imgs)):
                     save_test_pic(str(p+test_n-batch_size), imgs[p], pre_box[p], tbox[p])
 
@@ -211,6 +214,7 @@ if __name__ == '__main__':
             opt.weight,
             opt.batch_size,
             opt.img_size,
-            opt.model)
+            opt.model,
+            num_batch = opt.num_batch)
 
     print(('%s %s.pt\niou %.4f, lsum %.4f, lobj %.4f, lcls %.4f')%(opt.model, opt.weight, *res))

@@ -1,6 +1,11 @@
 import torch
 import torch.nn as nn
-from anypacking import quant_module
+import torch.nn.functional as F
+from anypacking import quant_module as qm
+
+class InputFactor:
+    def __call__(self, pic):
+        return pic * 255.0 / 256.0
 
 class LeNet(nn.Module):
     def __init__(self):
@@ -101,6 +106,154 @@ class VGG_tiny(nn.Module):
             nn.Linear(256*4*4, num_classes)
         )
 
+    def forward(self, x):
+        return self.layers(x)
+
+
+class VGG_tiny_MixQ(nn.Module):
+    def __init__(self, num_classes=10, share_weight = True):
+        super(VGG_tiny_MixQ, self).__init__()
+        self.pooling = nn.MaxPool2d(kernel_size=2, stride=2)
+        self.conv_func = qm.MixActivConv2d
+        conv_func = self.conv_func
+
+        conv_kwargs = {'kernel_size':3, 'stride':1, 'padding':1, 'bias':False}
+        qspace = {'wbits':[2,3,4,5,6,7,8], 'abits':[2,3,4,5,6,7,8], 'share_weight': share_weight}
+
+        self.layers = nn.Sequential(
+            conv_func(3, 64, ActQ = qm.ImageInputQ, **conv_kwargs, **qspace), # 0
+            nn.BatchNorm2d(64),
+
+            conv_func(64, 64, **conv_kwargs, **qspace), # 1
+            self.pooling,
+            nn.BatchNorm2d(64),
+
+            conv_func(64, 128, **conv_kwargs, **qspace), # 2
+            nn.BatchNorm2d(128),
+
+            conv_func(128, 128, **conv_kwargs, **qspace), # 3
+            self.pooling,
+            nn.BatchNorm2d(128),
+
+            conv_func(128, 256, **conv_kwargs, **qspace), # 4
+            nn.BatchNorm2d(256),
+
+            conv_func(256, 256, **conv_kwargs, **qspace), # 5
+            self.pooling,
+            nn.BatchNorm2d(256),
+
+            nn.Flatten(),
+            qm.QuantActivLinear(256*4*4, num_classes, bias=True, wbit=8, abit=8)
+        )
 
     def forward(self, x):
         return self.layers(x)
+
+    def fetch_best_arch(self):
+        sum_bitops, sum_bita, sum_bitw, sum_dsps = 0, 0, 0, 0
+        sum_mixbitops, sum_mixbita, sum_mixbitw, sum_mixdsps = 0, 0, 0, 0
+        layer_idx = 0
+        best_arch = None
+        for m in self.modules():
+            if isinstance(m, self.conv_func):
+                layer_arch, bitops, bita, bitw, mixbitops, mixbita, mixbitw, dsps, mixdsps = m.fetch_best_arch(layer_idx)
+                if best_arch is None:
+                    best_arch = layer_arch
+                else:
+                    for key in layer_arch.keys():
+                        if key not in best_arch:
+                            best_arch[key] = layer_arch[key]
+                        else:
+                            best_arch[key].append(layer_arch[key][0])
+                sum_bitops += bitops
+                sum_bita += bita
+                sum_bitw += bitw
+                sum_mixbitops += mixbitops
+                sum_mixbita += mixbita
+                sum_mixbitw += mixbitw
+                sum_dsps += dsps
+                sum_mixdsps += mixdsps
+                layer_idx += 1
+        return best_arch, sum_bitops, sum_bita, sum_bitw, sum_mixbitops, sum_mixbita, sum_mixbitw, sum_dsps, sum_mixdsps
+
+    def complexity_loss(self):
+        size_product = []
+        loss = 0
+        for m in self.modules():
+            if isinstance(m, self.conv_func):
+                loss += m.complexity_loss()
+                size_product += [m.size_product]
+        normalizer = size_product[0].item()
+        loss /= normalizer
+        return loss
+
+class VGG_tiny_FixQ(nn.Module):
+    def __init__(self, num_classes=10, bitw = '444444', bita = '844444'):
+        super(VGG_tiny_FixQ, self).__init__()
+        self.pooling = nn.MaxPool2d(kernel_size=2, stride=2)
+        self.conv_func = qm.QuantActivConv2d
+        conv_func = self.conv_func
+
+        assert(len(bitw)==0 or len(bitw)==6)
+        assert(len(bita)==0 or len(bita)==6)
+        if isinstance(bitw, str):
+            bitw=list(map(int, bitw))
+        if isinstance(bita, str):
+            bita=list(map(int, bita))
+
+        self.bitw = bitw
+        self.bita = bita
+        self.model_params = {'bitw': bitw, 'bita': bita}
+
+        conv_kwargs = {'kernel_size':3, 'stride':1, 'padding':1, 'bias':False}
+
+        self.layers = nn.Sequential(
+            conv_func(3, 64, ActQ = qm.ImageInputQ, **conv_kwargs, wbit=bitw[0], abit=bita[0]), # 0
+            nn.BatchNorm2d(64),
+
+            conv_func(64, 64, **conv_kwargs, wbit=bitw[1], abit=bita[1]), # 1
+            self.pooling,
+            nn.BatchNorm2d(64),
+
+            conv_func(64, 128, **conv_kwargs, wbit=bitw[2], abit=bita[2]), # 2
+            nn.BatchNorm2d(128),
+
+            conv_func(128, 128, **conv_kwargs, wbit=bitw[3], abit=bita[3]), # 3
+            self.pooling,
+            nn.BatchNorm2d(128),
+
+            conv_func(128, 256, **conv_kwargs, wbit=bitw[4], abit=bita[4]), # 4
+            nn.BatchNorm2d(256),
+
+            conv_func(256, 256, **conv_kwargs, wbit=bitw[5], abit=bita[5]), # 5
+            self.pooling,
+            nn.BatchNorm2d(256),
+
+            nn.Flatten(),
+            qm.QuantActivLinear(256*4*4, num_classes, bias=True, wbit=8, abit=8)
+        )
+
+    def forward(self, x):
+        return self.layers(x)
+
+    def fetch_arch_info(self):
+        sum_bitops, sum_bita, sum_bitw, sum_dsps = 0, 0, 0, 0
+        layer_idx = 0
+        for m in self.modules():
+            if isinstance(m, self.conv_func):
+                size_product = m.size_product.item()
+                memory_size = m.memory_size.item()
+                bitops = size_product * m.abit * m.wbit
+                bita = m.memory_size.item() * m.abit
+                bitw = m.param_size * m.wbit
+                dsps = size_product / qm.dsp_factors[m.wbit-2][m.abit-2]
+                weight_shape = list(m.conv.weight.shape)
+                print('idx {} with shape {}, bitops: {:.3f}M * {} * {}, memory: {:.3f}K * {}, '
+                      'param: {:.3f}M * {}, dsps: {:.3f}M'.format(layer_idx, weight_shape, size_product, m.abit,
+                                                   m.wbit, memory_size, m.abit, m.param_size, m.wbit, dsps))
+                sum_bitops += bitops
+                sum_bita += bita
+                sum_bitw += bitw
+                sum_dsps += dsps
+                layer_idx += 1
+        return sum_bitops, sum_bita, sum_bitw, sum_dsps

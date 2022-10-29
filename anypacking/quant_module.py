@@ -159,12 +159,15 @@ class QuantLinear(nn.Linear):
     def forward(self, input):
         # quantized linear, otherwise regular
         if self.bit < 32:
-            assert self.bias is None
+            # assert self.bias is None
             quant_weight = _gauss_quantize.apply(self.weight, self.step, self.bit)
             out = F.linear(input, quant_weight, self.bias)
         else:
             out = F.linear(input, self.weight, self.bias)
         return out
+
+    def export_quant(self):
+        return _gauss_quantize_export(self.weight, self.step, self.bit)
 
 class QuantActivConv2d(nn.Module):
 
@@ -360,7 +363,6 @@ class MixActivConv2d(nn.Module):
     
     def complexity_loss(self):
         sa = F.softmax(self.mix_activ.alpha_activ, dim=0)
-        mix_abit = 0
         abits = self.mix_activ.bits
         sw = F.softmax(self.mix_weight.alpha_weight, dim=0)
         mix_scale = 0
@@ -420,7 +422,7 @@ class SharedMixQuantLinear(nn.Module):
 
     def __init__(self, inplane, outplane, bits, **kwargs):
         super(SharedMixQuantLinear, self).__init__()
-        assert not kwargs['bias']
+        # assert not kwargs['bias']
         self.bits = bits
         self.alpha_weight = Parameter(torch.Tensor(len(self.bits)))
         self.alpha_weight.data.fill_(0.01)
@@ -474,7 +476,7 @@ class MixActivLinear(nn.Module):
         out = self.mix_weight(out)
         return out
 
-    def complexity_loss(self):
+    def complexity_loss_old(self):
         sw = F.softmax(self.mix_activ.alpha_activ, dim=0)
         mix_abit = 0
         abits = self.mix_activ.bits
@@ -486,6 +488,18 @@ class MixActivLinear(nn.Module):
         for i in range(len(wbits)):
             mix_wbit += sw[i] * wbits[i]
         complexity = self.size_product.item() * mix_abit * mix_wbit
+        return complexity
+
+    def complexity_loss(self):
+        sa = F.softmax(self.mix_activ.alpha_activ, dim=0)
+        abits = self.mix_activ.bits
+        sw = F.softmax(self.mix_weight.alpha_weight, dim=0)
+        mix_scale = 0
+        wbits = self.mix_weight.bits
+        for i in range(len(wbits)):
+            for j in range(len(abits)):
+                mix_scale += sw[i] * sa[j] / dsp_factors[wbits[i]-2][abits[j]-2]
+        complexity = self.size_product.item() * 64 * mix_scale
         return complexity
 
     def fetch_best_arch(self, layer_idx):
@@ -516,7 +530,13 @@ class MixActivLinear(nn.Module):
         bitops = size_product * abits[best_activ] * wbits[best_weight]
         bita = memory_size * abits[best_activ]
         bitw = self.param_size * wbits[best_weight]
+        dsps = size_product / dsp_factors[wbits[best_weight]-2][abits[best_activ]-2]
         mixbitops = size_product * mix_abit * mix_wbit
         mixbita = memory_size * mix_abit
         mixbitw = self.param_size * mix_wbit
-        return best_arch, bitops, bita, bitw, mixbitops, mixbita, mixbitw
+        mixdsps = 0
+        for i in range(len(wbits)):
+            for j in range(len(abits)):
+                mixdsps += prob_weight[i] * prob_activ[j] / dsp_factors[wbits[i]-2][abits[j]-2]
+        mixdsps *= size_product
+        return best_arch, bitops, bita, bitw, mixbitops, mixbita, mixbitw, dsps, mixdsps
