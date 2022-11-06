@@ -35,6 +35,12 @@ def train():
 
     model = models.VGG_tiny_FixQ(bitw = opt.bitw, bita = opt.bita)
     model.to(device)
+    if opt.weights is not None:
+        weights_file = 'weights/' + opt.weights + '.pt'
+        chkpt = torch.load(weights_file, map_location=device)
+        chkpt['model'] = {k: v for k, v in chkpt['model'].items() if 
+                    model.state_dict()[k].numel() == v.numel()}
+        model.load_state_dict(chkpt['model'], strict=False)
 
     results_file = 'results/%s.txt'%opt.name
     
@@ -103,11 +109,12 @@ def train():
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--epochs', type=int, default=40) 
+    parser.add_argument('-n', '--name', default='VGG_tiny_FixQ', help='result and weight file name')
+    parser.add_argument('-w', '--weights', default=None, help='weights path')
+    parser.add_argument('-e', '--epochs', type=int, default=40) 
     parser.add_argument('--batch-size', type=int, default=128) 
     parser.add_argument('--device', default='', help='device id (i.e. 0 or 0,1 or cpu)')
-    parser.add_argument('--lr', type=float, default=0.1)
-    parser.add_argument('--name', default='VGG_tiny_FixQ', help='result and weight file name')
+    parser.add_argument('--lr', type=float, default=0.03)
     parser.add_argument('--bitw', type=str, default='')
     parser.add_argument('--bita', type=str, default='')
 

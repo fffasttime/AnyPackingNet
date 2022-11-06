@@ -101,7 +101,7 @@ if __name__ == '__main__':
     parser.add_argument('--epochs', type=int, default=40) 
     parser.add_argument('--device', default='', help='device id (i.e. 0 or 0,1 or cpu)')
     parser.add_argument('--batch-size', type=int, default=128) 
-    parser.add_argument('--lr', type=float, default=0.1)
+    parser.add_argument('--lr', type=float, default=0.03)
     parser.add_argument('--model', type=str, default='VGG_tiny')
     parser.add_argument('--name', default='', help='result and weight file name')
 

@@ -46,7 +46,7 @@ def test(model, device, batch_size = 64, num_batch = -1):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(prog='test.py')
-    parser.add_argument('-m', '--model', type=str, default='VGG_tiny', help='model name')
+    parser.add_argument('-m', '--model', type=str, default='VGG_tiny_FixQ', help='model name')
     parser.add_argument('-w', '--weight', default=None, help='weights path')
     parser.add_argument('-bs', '--batch-size', type=int, default=64, help='size of each image batch')
     parser.add_argument('--device', default='', help='device id (i.e. 0 or 0,1) or cpu')

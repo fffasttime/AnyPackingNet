@@ -52,7 +52,7 @@ def train():
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             optimizer, T_max=opt.epochs, eta_min=opt.lr*0.01) 
     arch_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            arch_optimizer, T_max=opt.epochs, eta_min=opt.lr*0.01)
+            arch_optimizer, T_max=opt.epochs, eta_min=opt.lr*0.3)
 
     model.train()
 
