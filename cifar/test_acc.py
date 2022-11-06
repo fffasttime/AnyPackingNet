@@ -4,6 +4,7 @@ import torch
 import torch.nn as nn
 import torchvision
 import torchvision.transforms as transforms
+import numpy as np
 from tqdm import tqdm
 
 import sys
@@ -14,17 +15,19 @@ from localconfig import data_path
 from utils.view_pt import select_weight_file
 from utils import torch_utils
 
+opt = None
+
 transform_test = transforms.Compose([
     transforms.ToTensor(),
+    models.InputFactor(),
 ])
-
 testset = torchvision.datasets.CIFAR10(root=data_path, train=False,
                                        download=False, transform=transform_test)
 
 def test(model, device, batch_size = 64, num_batch = -1):
+    model.eval()
     testloader = torch.utils.data.DataLoader(testset, batch_size=batch_size, shuffle=False, num_workers=2)
     criterion = nn.CrossEntropyLoss()
-
     with torch.no_grad():
         mloss = macc = 0.
         pbar = tqdm(enumerate(testloader), total=len(testloader))
@@ -36,6 +39,11 @@ def test(model, device, batch_size = 64, num_batch = -1):
             _, predicted = torch.max(outputs.data, 1)
             correct = (predicted == labels).sum().item()
             
+            if opt and opt.verbose:
+                np.set_printoptions(precision = 2)
+                for p in range(len(inputs)):
+                    print(predicted[p].numpy(), labels[p].numpy(), outputs[p].numpy())
+
             loss = criterion(outputs, labels)
             mloss = (mloss*i + loss.item()) / (i+1)
             macc = (macc*i + correct/batch_size) / (i+1)
@@ -50,7 +58,7 @@ if __name__ == '__main__':
     parser.add_argument('-w', '--weight', default=None, help='weights path')
     parser.add_argument('-bs', '--batch-size', type=int, default=64, help='size of each image batch')
     parser.add_argument('--device', default='', help='device id (i.e. 0 or 0,1) or cpu')
-    parser.add_argument('--verbose', action='store_true', help = 'show predict value result')
+    parser.add_argument('-v', '--verbose', action='store_true', help = 'show predict value result')
     parser.add_argument('-nb', '--num-batch', type=int, default='-1', help='num of batchs to run, -1 for full dataset')
     opt = parser.parse_args()
     print(opt)

@@ -63,10 +63,8 @@ class HWModel:
         return io
 
 def testdataset(hwmodel):
-    batch_size = 1
     img_size = 320
     dataset = LoadImagesAndLabels(opt.datapath, img_size, opt.batch_size, rect=False, cache_labels=True, hyp=hyp, augment=False)
-    batch_size = min(batch_size, len(dataset))
     dataloader = DataLoader(dataset,
                             batch_size=opt.batch_size,
                             #num_workers=min([os.cpu_count(), batch_size if batch_size > 1 else 0, 8]),

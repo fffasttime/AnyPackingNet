@@ -195,6 +195,7 @@ class QuantActivConv2d(nn.Module):
         tmp = torch.tensor(self.filter_size * in_shape[-1] * in_shape[-2], dtype=torch.float)
         self.size_product.copy_(tmp)
         out = self.activ(input)
+        ## print('ii',input[0,0,:,:]/self.activ.step)
         ## print('convi', torch.round(out[0,0,:,0]/self.activ.step).int())
         ## wstd = self.conv.weight.std()
         out = self.conv(out)

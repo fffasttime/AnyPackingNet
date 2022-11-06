@@ -115,6 +115,8 @@ def extract_model(in_shape):
 
             conv_cur.ich = sub_module.in_features
             conv_cur.och = sub_module.out_features
+            conv_cur.irow = feature_map_shape[1]
+            conv_cur.icol = feature_map_shape[2]
             
             if sub_module.bias is not None:
                 conv_cur.convbias = sub_module.bias.detach().numpy()
@@ -139,10 +141,11 @@ def extract_model(in_shape):
             var = sub_module.running_var
             eps = sub_module.eps
             
-            model_param[-1].bn_w = (gamma / (torch.sqrt(var) + eps)).detach().numpy()
-            model_param[-1].bn_b = (beta - (mean / (torch.sqrt(var) + eps) * gamma)).detach().numpy()
+            model_param[-1].bn_w = (gamma / (torch.sqrt(var + eps))).detach().numpy()
+            model_param[-1].bn_b = (beta - (mean / (torch.sqrt(var + eps)) * gamma)).detach().numpy()
 
         elif isinstance(sub_module, torch.nn.MaxPool2d):
+            print('  Detected MaxPool2d')
             feature_map_shape[1] = feature_map_shape[1] // sub_module.kernel_size
             feature_map_shape[2] = feature_map_shape[2] // sub_module.kernel_size
     
@@ -174,7 +177,7 @@ def process_batchnorm(model_param):
     incbit = len(bit(inc)); biasbit = len(bit(bias))
     larger lshift is better, but MBIT+incbit<48
     '''
-    lshift = 8
+    lshift = 16
 
     for conv in model_param[:-1]:
         print(f'Process bn_{conv.n}, shape {conv.bn_w.shape},', end = ' ')
@@ -185,6 +188,8 @@ def process_batchnorm(model_param):
         ostep = conv.ostep
         inc_raw = conv.bn_w * MACstep / ostep
         bias_raw = conv.bn_b / ostep
+        conv.inc_raw = inc_raw
+        conv.bias_raw = bias_raw
 
         # Quantization
         T = lshift+conv.wbit+conv.abit-1
@@ -348,7 +353,7 @@ if __name__=='__main__':
     model.load_state_dict(ptfile['model'])
 
     # processs
-    model_param = extract_model([1, 160, 320])
+    model_param = extract_model([1, 32, 32])
     adjust_weight(model_param)
     process_batchnorm(model_param) # get bn param before write hls config
     torch.save(model_param, dir_output + 'model_param.pkl')

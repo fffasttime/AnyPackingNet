@@ -190,7 +190,6 @@ class VGG_tiny_MixQ(nn.Module):
 class VGG_tiny_FixQ(nn.Module):
     def __init__(self, num_classes=10, bitw = '444444', bita = '844444'):
         super(VGG_tiny_FixQ, self).__init__()
-        self.pooling = nn.MaxPool2d(kernel_size=2, stride=2)
         self.conv_func = qm.QuantActivConv2d
         conv_func = self.conv_func
 
@@ -212,21 +211,21 @@ class VGG_tiny_FixQ(nn.Module):
             nn.BatchNorm2d(64),
 
             conv_func(64, 64, **conv_kwargs, wbit=bitw[1], abit=bita[1]), # 1
-            self.pooling,
+            nn.MaxPool2d(kernel_size=2, stride=2),
             nn.BatchNorm2d(64),
 
             conv_func(64, 128, **conv_kwargs, wbit=bitw[2], abit=bita[2]), # 2
             nn.BatchNorm2d(128),
 
             conv_func(128, 128, **conv_kwargs, wbit=bitw[3], abit=bita[3]), # 3
-            self.pooling,
+            nn.MaxPool2d(kernel_size=2, stride=2),
             nn.BatchNorm2d(128),
 
             conv_func(128, 256, **conv_kwargs, wbit=bitw[4], abit=bita[4]), # 4
             nn.BatchNorm2d(256),
 
             conv_func(256, 256, **conv_kwargs, wbit=bitw[5], abit=bita[5]), # 5
-            self.pooling,
+            nn.MaxPool2d(kernel_size=2, stride=2),
             nn.BatchNorm2d(256),
 
             nn.Flatten(),

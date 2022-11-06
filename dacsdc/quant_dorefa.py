@@ -254,7 +254,7 @@ def batchNorm1d_Q_fn(w_bit):
         mean = self.running_mean
         eps = self.eps
         bias = self.bias
-        w = gamma / (torch.sqrt(var) + eps)
+        w = gamma / (torch.sqrt(var) + eps)    # this is a small bug in previous code   https://github.com/heheda365/ultra_net/issues/9
         b = bias -  (mean / (torch.sqrt(var) + eps)) * gamma
 
         # w = torch.clamp(w, -1, 1) / 2 + 0.5

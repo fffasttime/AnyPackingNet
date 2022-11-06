@@ -133,8 +133,8 @@ def extract_model(in_shape):
             var = sub_module.running_var
             eps = sub_module.eps
             
-            model_param[-1].bn_w = (gamma / (torch.sqrt(var) + eps)).detach().numpy()
-            model_param[-1].bn_b = (beta - (mean / (torch.sqrt(var) + eps) * gamma)).detach().numpy()
+            model_param[-1].bn_w = (gamma / (torch.sqrt(var + eps))).detach().numpy()
+            model_param[-1].bn_b = (beta - (mean / (torch.sqrt(var + eps)) * gamma)).detach().numpy()
 
         elif isinstance(sub_module, torch.nn.MaxPool2d):
             feature_map_shape[1] = feature_map_shape[1] // sub_module.kernel_size
