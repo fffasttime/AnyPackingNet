@@ -109,6 +109,7 @@ def test(weights=None,
          model=None,
          dataloader=None,
          num_batch=-1):
+    # torch.set_default_tensor_type(torch.DoubleTensor)
     # Initialize/load model and set device
     if model is None or type(model)==str:
         device = torch_utils.select_device(opt.device, batch_size=batch_size)
@@ -202,7 +203,7 @@ if __name__ == '__main__':
     parser.add_argument('--img-size', type=int, default=320, help='inference size (pixels)')
     parser.add_argument('--device', default='', help='device id (i.e. 0 or 0,1) or cpu')
     parser.add_argument('--datapath', default='../../dacsdc_dataset', help = 'test dataset path')
-    parser.add_argument('--verbose', action='store_true', help = 'show predict value result')
+    parser.add_argument('-v', '--verbose', action='store_true', help = 'show predict value result')
     parser.add_argument('--save-pic', action='store_true', help = 'save predict output picture')
     parser.add_argument('-nb', '--num-batch', type=int, default='-1', help='num of batchs to run, -1 for full dataset')
     opt = parser.parse_args()
@@ -217,4 +218,4 @@ if __name__ == '__main__':
             opt.model,
             num_batch = opt.num_batch)
 
-    print(('%s %s.pt\niou %.4f, lsum %.4f, lobj %.4f, lcls %.4f')%(opt.model, opt.weight, *res))
+    print(('%s %s.pt\niou %.5f, lsum %.4f, lobj %.4f, lcls %.4f')%(opt.model, opt.weight, *res))

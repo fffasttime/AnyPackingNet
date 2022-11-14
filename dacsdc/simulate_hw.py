@@ -24,17 +24,30 @@ class QConvLayer:
         x = F.conv2d(x, self.w, bias=None, stride=self.conv.s, padding=self.conv.p) # [N, OCH, OROW, OCOL]
         # print('convo', self.conv.n, x[0,0,:,0])
         och = x.shape[1]
-        if self.conv.inc is not None:
-            inc_ch = self.conv.inc.reshape((1, och, 1, 1))
-            x *= inc_ch
+        if False:
+            if self.conv.inc is not None:
+                inc_ch = self.conv.inc.reshape((1, och, 1, 1))
+                x *= inc_ch
+            if hasattr(self.conv, 'bias'):
+                bias_ch = self.conv.bias.reshape((1, och, 1, 1))
+                x += bias_ch
 
-        if hasattr(self.conv, 'bias'):
-            bias_ch = self.conv.bias.reshape((1, och, 1, 1))
-            x += bias_ch
-        
-        if hasattr(self.conv, 'lshift'):
-            x += 1 << self.conv.lshift_T-1
-            x >>= self.conv.lshift_T
+            # print('biaso', self.conv.n, x[0,0,:,:]/2**self.conv.lshift_T)
+            if hasattr(self.conv, 'lshift'):
+                x += 1 << self.conv.lshift_T-1
+                x >>= self.conv.lshift_T
+
+        else: ## no inc/bias quantization
+            if self.conv.inc is not None:
+                inc_ch = self.conv.inc_raw.reshape((1, och, 1, 1))
+                x *= inc_ch
+            if hasattr(self.conv, 'bias'):
+                bias_ch = self.conv.bias_raw.reshape((1, och, 1, 1))
+                x += bias_ch
+            # if hasattr(self.conv, 'max_pool'): # maxpool
+            #     x = F.max_pool2d(x, kernel_size = 2, stride = 2)
+            # print('biaso', self.conv.n, x[0,0,:,0])
+            x = torch.round(x).to(dtype = torch.int64)
         
         if hasattr(self.conv, 'obit'):
             x.clip_(0, 2**(self.conv.obit)-1)

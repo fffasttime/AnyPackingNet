@@ -139,6 +139,7 @@ def extract_model(in_shape):
         elif isinstance(sub_module, torch.nn.MaxPool2d):
             feature_map_shape[1] = feature_map_shape[1] // sub_module.kernel_size
             feature_map_shape[2] = feature_map_shape[2] // sub_module.kernel_size
+            model_param[-1].max_pool = True
     
     if not hasattr(model_param[0], 'abit'): # train code rescaled [0,255] to [0,1) by /256 default
         model_param[0].abit = 8
@@ -171,7 +172,7 @@ def process_batchnorm(model_param):
     incbit = len(bit(inc)); biasbit = len(bit(bias))
     larger lshift is better, but MBIT+incbit<48
     '''
-    lshift = 8
+    lshift = 16
 
     for conv in model_param[:-1]:
         print(f'Process bn_{conv.n}, shape {conv.bn_w.shape},', end = ' ')
@@ -182,6 +183,8 @@ def process_batchnorm(model_param):
         ostep = conv.ostep
         inc_raw = conv.bn_w * MACstep / ostep
         bias_raw = conv.bn_b / ostep
+        conv.inc_raw = inc_raw
+        conv.bias_raw = bias_raw
 
         # Quantization
         T = lshift+conv.wbit+conv.abit-1
@@ -198,6 +201,7 @@ def process_batchnorm(model_param):
     conv_last.inc = None
     conv_last.div = 1/(conv_last.wstep * conv_last.astep)
     conv_last.bias = np.round(conv_last.convbias * conv_last.div).astype(np.int64)
+    conv_last.bias_raw = conv_last.convbias * conv_last.div
     conv_last.biasbit = bitlength(conv_last.bias)
     print(f'conv_last biasbit {conv_last.biasbit}, div {conv_last.div}')
 
