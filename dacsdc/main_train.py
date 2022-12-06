@@ -59,10 +59,13 @@ def train():
     test_path = localconfig.test_path
     nc = 1 
 
-    results_file = 'result_%s.txt'%opt.name
+    results_file = 'results/%s.txt'%opt.name
 
     # Initialize model
-    model = UltraNet_FixQ(opt.bitw, opt.bita).to(device)
+    if opt.bypass:
+        model = UltraNetBypass_FixQ(opt.bitw, opt.bita).to(device)
+    else:
+        model = UltraNet_FixQ(opt.bitw, opt.bita).to(device)
 
     # Optimizer
     pg0, pg1, pg2 = [], [], []  # optimizer parameter groups
@@ -270,10 +273,10 @@ def train():
                          'extra': {'time': time.ctime(), 'name': opt.name}}
 
             # Save last checkpoint
-            torch.save(chkpt, wdir + 'last_%s.pt'%opt.name)
+            torch.save(chkpt, wdir + '%s_last.pt'%opt.name)
             
             if test_iou == test_best_iou:
-                torch.save(chkpt, wdir + 'test_best_%s.pt'%opt.name)
+                torch.save(chkpt, wdir + '%s_best.pt'%opt.name)
 
             # Delete checkpoint
             del chkpt
@@ -292,6 +295,7 @@ def train():
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
+    parser.add_argument('--bypass', action='store_true', help='use bypass model')
     parser.add_argument('--epochs', type=int, default=200)  # 500200 batches at bs 16, 117263 COCO images = 273 epochs
     parser.add_argument('--batch-size', type=int, default=64)  # effective bs = batch_size * accumulate = 16 * 4 = 64
     parser.add_argument('--accumulate', type=int, default=1, help='batches to accumulate before optimizing')

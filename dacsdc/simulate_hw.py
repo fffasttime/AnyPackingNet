@@ -24,7 +24,7 @@ class QConvLayer:
         x = F.conv2d(x, self.w, bias=None, stride=self.conv.s, padding=self.conv.p) # [N, OCH, OROW, OCOL]
         # print('convo', self.conv.n, x[0,0,:,0])
         och = x.shape[1]
-        if False:
+        if True:
             if self.conv.inc is not None:
                 inc_ch = self.conv.inc.reshape((1, och, 1, 1))
                 x *= inc_ch
@@ -54,6 +54,20 @@ class QConvLayer:
 
         return x
 
+def reorg(x):
+    stride = 2
+    B = x.data.size(0)
+    C = x.data.size(1)
+    H = x.data.size(2)
+    W = x.data.size(3)
+    ws = stride
+    hs = stride
+    x = x.view([B, C, H//hs, hs, W//ws, ws]).transpose(3, 4).contiguous()
+    x = x.view([B, C, H//hs*W//ws, hs*ws]).transpose(2, 3).contiguous()
+    x = x.view([B, C, hs*ws, H//hs, W//ws]).transpose(1, 2).contiguous()
+    x = x.view([B, hs*ws*C, H//hs, W//ws])
+    return x
+
 class HWModel:
     def __init__(self, model_param):
         self.layers = [QConvLayer(conv_param) for conv_param in model_param]
@@ -67,8 +81,19 @@ class HWModel:
         if self.layers[0].conv.abit<8: # ImageInputQ
             x=x>>(8-self.layers[0].conv.abit) 
 
-        for i, layer in enumerate(self.layers):
-            x = layer(x)
+        if not opt.bypass:
+            for i, layer in enumerate(self.layers):
+                x = layer(x)
+        else:
+            for i in [0,1,2,3]:
+                x = self.layers[i](x)
+            p4_in = torch.round(reorg(x) * 
+                        self.layers[4].conv.astep / self.layers[7].conv.astep).to(dtype=torch.int64)
+            for i in [4,5,6]:
+                x = self.layers[i](x)
+            x = torch.cat([p4_in, x], 1)
+            for i in [7,8]:
+                x= self.layers[i](x)
         
         x = x.float() / self.layers[-1].conv.div
 
@@ -110,6 +135,7 @@ def testdataset(hwmodel):
 if __name__=='__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-w', '--weight', help='weight folder name in ./hls/, which contians model_param.pkl')
+    parser.add_argument('-bp', '--bypass', action='store_true', help='use bypass model')
     parser.add_argument('--datapath', default='../../dacsdc_dataset', help = 'test dataset path')
     parser.add_argument('-bs', '--batch-size', type=int, default=1, help = 'batch-size')
     parser.add_argument('-nb', '--num-batch', type=int, default=1, help = 'num of batchs to run, -1 for full dataset')

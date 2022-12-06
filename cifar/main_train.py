@@ -113,6 +113,7 @@ if __name__ == '__main__':
     parser.add_argument('-w', '--weights', default=None, help='weights path')
     parser.add_argument('-e', '--epochs', type=int, default=40) 
     parser.add_argument('--batch-size', type=int, default=128) 
+    parser.add_argument('--bypass', action='store_true', help='use bypass model')
     parser.add_argument('--device', default='', help='device id (i.e. 0 or 0,1 or cpu)')
     parser.add_argument('--lr', type=float, default=0.03)
     parser.add_argument('--bitw', type=str, default='')

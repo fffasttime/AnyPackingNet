@@ -67,14 +67,14 @@ def train():
     test_path = localconfig.test_path
     nc = 1 
 
-    results_file = 'result_%s.txt'%opt.name
+    results_file = 'results/%s.txt'%opt.name
     # Remove previous results
     for f in glob.glob('*_batch*.png') + glob.glob(results_file):
         os.remove(f)
 
     # Initialize model
     # model = Darknet(cfg, arc=opt.arc).to(device)
-    model = UltraNetFloat().to(device)
+    model = UltraNetBypassFloat().to(device)
     # model = SkyNet().to(device)
     # model = TempNet().to(device)
     # model = TempNetDW().to(device)
@@ -346,14 +346,10 @@ def train():
                          'optimizer': None if final_epoch else optimizer.state_dict()}
 
             # Save last checkpoint
-            torch.save(chkpt, wdir + 'last_%s.pt'%opt.name)
-
-            # Save best checkpoint
-            if best_fitness == fi:
-                torch.save(chkpt, wdir + 'best_%s.pt'%opt.name)
+            torch.save(chkpt, wdir + '%s_last.pt'%opt.name)
             
             if test_iou == test_best_iou:
-                torch.save(chkpt, wdir + 'test_best_%s.pt'%opt.name)
+                torch.save(chkpt, wdir + '%s_best.pt'%opt.name)
 
             # Save backup every 10 epochs (optional)
             # if epoch > 0 and epoch % 10 == 0:

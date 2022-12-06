@@ -58,10 +58,13 @@ def train():
     test_path = localconfig.test_path
     nc = 1 
 
-    results_file = 'result_%s.txt'%opt.name
+    results_file = 'results/%s.txt'%opt.name
 
     # Initialize model
-    model = UltraNet_MixQ(opt.share_weight).to(device)
+    if opt.bypass:
+        model = UltraNetBypass_MixQ(not opt.no_share).to(device)
+    else:
+        model = UltraNet_MixQ(not opt.no_share).to(device)
 
     # Optimizer
     pg0, pg1, pg2 = [], [], []  # optimizer parameter groups
@@ -302,10 +305,10 @@ def train():
                          'extra': {'time': time.ctime(), 'name': opt.name}}
 
             # Save last checkpoint
-            torch.save(chkpt, wdir + 'last_%s.pt'%opt.name)
+            torch.save(chkpt, wdir + '%s_last.pt'%opt.name)
             
             if test_iou == test_best_iou:
-                torch.save(chkpt, wdir + 'test_best_%s.pt'%opt.name)
+                torch.save(chkpt, wdir + '%s_best.pt'%opt.name)
 
             # Delete checkpoint
             del chkpt
@@ -324,6 +327,7 @@ def train():
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
+    parser.add_argument('--bypass', action='store_true', help='use bypass model')
     parser.add_argument('--epochs', type=int, default=35)  # 500200 batches at bs 16, 117263 COCO images = 273 epochs
     parser.add_argument('--batch-size', type=int, default=64)  # effective bs = batch_size * accumulate = 16 * 4 = 64
     parser.add_argument('--accumulate', type=int, default=1, help='batches to accumulate before optimizing')
@@ -344,7 +348,7 @@ if __name__ == '__main__':
     parser.add_argument('--var', type=float, help='debug variable')
     parser.add_argument('--complexity-decay', '--cd', default=0, type=float, metavar='W', help='complexity decay (default: 0)')
     parser.add_argument('--lra', '--learning-rate-alpha', default=0.01, type=float, metavar='LR', help='initial alpha learning rate')
-    parser.add_argument('--share-weight', action='store_true', help='share weight quantization')
+    parser.add_argument('--no-share', action='store_true', help='no share weight quantization')
     
     opt = parser.parse_args()
     last = wdir + 'last_%s.pt'%opt.name

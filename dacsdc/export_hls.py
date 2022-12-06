@@ -305,7 +305,8 @@ def write_hls_weights(model_param, path):
     f.close()
 
 def adjust_weight(model_param):
-    special_wa_bit = ((5,6), (7,3)) # These packing can't quantize to -2**(wbit-1)
+    special_wa_bit = ((4,2),(5,3),(5,4),(5,5),(5,6),(5,7),(5,8),(7,2),(7,3)) 
+    # These packing can't quantize to -2**(wbit-1)
     for conv in model_param:
         if (conv.wbit, conv.abit) in special_wa_bit:
             print(f'Adjust conv_{conv.n} wbit={conv.wbit}')
