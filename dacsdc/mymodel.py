@@ -57,6 +57,70 @@ class YOLOLayer(nn.Module):
             
             return io.view(bs, -1, self.no), p
 
+def fixq_fetch_arch_info(self):
+    sum_bitops, sum_bita, sum_bitw, sum_dsps = 0, 0, 0, 0
+    layer_idx = 0
+    for m in self.modules():
+        if isinstance(m, self.conv_func):
+            if m.wbit == 32 or m.abit == 32:
+                layer_idx += 1
+                continue
+
+            size_product = m.size_product.item()
+            memory_size = m.memory_size.item()
+            bitops = size_product * m.abit * m.wbit
+            bita = m.memory_size.item() * m.abit
+            bitw = m.param_size * m.wbit
+            dsps = size_product / qm.dsp_factors[m.wbit-2][m.abit-2]
+            weight_shape = list(m.conv.weight.shape)
+            print('idx {} with shape {}, bitops: {:.3f}M * {} * {}, memory: {:.3f}K * {}, '
+                    'param: {:.3f}M * {}, dsps: {:.3f}M'.format(layer_idx, weight_shape, size_product, m.abit,
+                                                m.wbit, memory_size, m.abit, m.param_size, m.wbit, dsps))
+            sum_bitops += bitops
+            sum_bita += bita
+            sum_bitw += bitw
+            sum_dsps += dsps
+            layer_idx += 1
+    return sum_bitops, sum_bita, sum_bitw, sum_dsps
+
+def mixq_fetch_best_arch(self):
+    sum_bitops, sum_bita, sum_bitw, sum_dsps = 0, 0, 0, 0
+    sum_mixbitops, sum_mixbita, sum_mixbitw, sum_mixdsps = 0, 0, 0, 0
+    layer_idx = 0
+    best_arch = None
+    for m in self.modules():
+        if isinstance(m, self.conv_func):
+            layer_arch, bitops, bita, bitw, mixbitops, mixbita, mixbitw, dsps, mixdsps = m.fetch_best_arch(layer_idx)
+            if best_arch is None:
+                best_arch = layer_arch
+            else:
+                for key in layer_arch.keys():
+                    if key not in best_arch:
+                        best_arch[key] = layer_arch[key]
+                    else:
+                        best_arch[key].append(layer_arch[key][0])
+            sum_bitops += bitops
+            sum_bita += bita
+            sum_bitw += bitw
+            sum_mixbitops += mixbitops
+            sum_mixbita += mixbita
+            sum_mixbitw += mixbitw
+            sum_dsps += dsps
+            sum_mixdsps += mixdsps
+            layer_idx += 1
+    return best_arch, sum_bitops, sum_bita, sum_bitw, sum_mixbitops, sum_mixbita, sum_mixbitw, sum_dsps, sum_mixdsps
+
+def mixq_complexity_loss(self):
+    size_product = []
+    loss = 0
+    for m in self.modules():
+        if isinstance(m, self.conv_func):
+            loss += m.complexity_loss()
+            size_product += [m.size_product]
+    normalizer = size_product[0].item()
+    loss /= normalizer
+    return loss
+
 class UltraNet_ismart(nn.Module):
     def __init__(self):
         super(UltraNet_ismart, self).__init__()
@@ -268,45 +332,12 @@ class UltraNet_MixQ(nn.Module):
             return torch.cat(io, 1), p
         return x 
 
-    def fetch_best_arch(self):
-        sum_bitops, sum_bita, sum_bitw, sum_dsps = 0, 0, 0, 0
-        sum_mixbitops, sum_mixbita, sum_mixbitw, sum_mixdsps = 0, 0, 0, 0
-        layer_idx = 0
-        best_arch = None
-        for m in self.modules():
-            if isinstance(m, self.conv_func):
-                layer_arch, bitops, bita, bitw, mixbitops, mixbita, mixbitw, dsps, mixdsps = m.fetch_best_arch(layer_idx)
-                if best_arch is None:
-                    best_arch = layer_arch
-                else:
-                    for key in layer_arch.keys():
-                        if key not in best_arch:
-                            best_arch[key] = layer_arch[key]
-                        else:
-                            best_arch[key].append(layer_arch[key][0])
-                sum_bitops += bitops
-                sum_bita += bita
-                sum_bitw += bitw
-                sum_mixbitops += mixbitops
-                sum_mixbita += mixbita
-                sum_mixbitw += mixbitw
-                sum_dsps += dsps
-                sum_mixdsps += mixdsps
-                layer_idx += 1
-        return best_arch, sum_bitops, sum_bita, sum_bitw, sum_mixbitops, sum_mixbita, sum_mixbitw, sum_dsps, sum_mixdsps
+    # def fetch_best_arch(self):
+    fetch_best_arch = mixq_fetch_best_arch
 
-    def complexity_loss(self):
-        size_product = []
-        loss = 0
-        for m in self.modules():
-            if isinstance(m, self.conv_func):
-                loss += m.complexity_loss()
-                size_product += [m.size_product]
-        normalizer = size_product[0].item()
-        loss /= normalizer
-        return loss
+    # def complexity_loss(self):
+    complexity_loss= mixq_complexity_loss
 
-        
 class UltraNet_FixQ(nn.Module):
     def __init__(self, bitw = '444444444', bita = '444444444'):
         super(UltraNet_FixQ, self).__init__()
@@ -376,27 +407,8 @@ class UltraNet_FixQ(nn.Module):
         else:  # test
             return p[0], (p[1],) # inference output, training output
 
-    def fetch_arch_info(self):
-        sum_bitops, sum_bita, sum_bitw, sum_dsps = 0, 0, 0, 0
-        layer_idx = 0
-        for m in self.modules():
-            if isinstance(m, self.conv_func):
-                size_product = m.size_product.item()
-                memory_size = m.memory_size.item()
-                bitops = size_product * m.abit * m.wbit
-                bita = m.memory_size.item() * m.abit
-                bitw = m.param_size * m.wbit
-                dsps = size_product / qm.dsp_factors[m.wbit-2][m.abit-2]
-                weight_shape = list(m.conv.weight.shape)
-                print('idx {} with shape {}, bitops: {:.3f}M * {} * {}, memory: {:.3f}K * {}, '
-                      'param: {:.3f}M * {}, dsps: {:.3f}M'.format(layer_idx, weight_shape, size_product, m.abit,
-                                                   m.wbit, memory_size, m.abit, m.param_size, m.wbit, dsps))
-                sum_bitops += bitops
-                sum_bita += bita
-                sum_bitw += bitw
-                sum_dsps += dsps
-                layer_idx += 1
-        return sum_bitops, sum_bita, sum_bitw, sum_dsps
+    # def fetch_arch_info(self):
+    fetch_arch_info = fixq_fetch_arch_info
 
 class UltraNetFloat(nn.Module):
     def __init__(self):
@@ -637,44 +649,11 @@ class UltraNetBypass_MixQ(nn.Module):
             return torch.cat(io, 1), p
         return x
 
-    def fetch_best_arch(self):
-        sum_bitops, sum_bita, sum_bitw, sum_dsps = 0, 0, 0, 0
-        sum_mixbitops, sum_mixbita, sum_mixbitw, sum_mixdsps = 0, 0, 0, 0
-        layer_idx = 0
-        best_arch = None
-        for m in self.modules():
-            if isinstance(m, self.conv_func):
-                layer_arch, bitops, bita, bitw, mixbitops, mixbita, mixbitw, dsps, mixdsps = m.fetch_best_arch(layer_idx)
-                if best_arch is None:
-                    best_arch = layer_arch
-                else:
-                    for key in layer_arch.keys():
-                        if key not in best_arch:
-                            best_arch[key] = layer_arch[key]
-                        else:
-                            best_arch[key].append(layer_arch[key][0])
-                sum_bitops += bitops
-                sum_bita += bita
-                sum_bitw += bitw
-                sum_mixbitops += mixbitops
-                sum_mixbita += mixbita
-                sum_mixbitw += mixbitw
-                sum_dsps += dsps
-                sum_mixdsps += mixdsps
-                layer_idx += 1
-        return best_arch, sum_bitops, sum_bita, sum_bitw, sum_mixbitops, sum_mixbita, sum_mixbitw, sum_dsps, sum_mixdsps
+    # def fetch_best_arch(self):
+    fetch_best_arch = mixq_fetch_best_arch
 
-    def complexity_loss(self):
-        size_product = []
-        loss = 0
-        for m in self.modules():
-            if isinstance(m, self.conv_func):
-                loss += m.complexity_loss()
-                size_product += [m.size_product]
-        normalizer = size_product[0].item()
-        loss /= normalizer
-        return loss
-
+    # def complexity_loss(self):
+    complexity_loss= mixq_complexity_loss
 
 class UltraNetBypass_FixQ(nn.Module):
     def __init__(self, bitw = '444444444', bita = '444444444'):
@@ -759,24 +738,286 @@ class UltraNetBypass_FixQ(nn.Module):
             return torch.cat(io, 1), p
         return x
 
-    def fetch_arch_info(self):
-        sum_bitops, sum_bita, sum_bitw, sum_dsps = 0, 0, 0, 0
-        layer_idx = 0
-        for m in self.modules():
-            if isinstance(m, self.conv_func):
-                size_product = m.size_product.item()
-                memory_size = m.memory_size.item()
-                bitops = size_product * m.abit * m.wbit
-                bita = m.memory_size.item() * m.abit
-                bitw = m.param_size * m.wbit
-                dsps = size_product / qm.dsp_factors[m.wbit-2][m.abit-2]
-                weight_shape = list(m.conv.weight.shape)
-                print('idx {} with shape {}, bitops: {:.3f}M * {} * {}, memory: {:.3f}K * {}, '
-                      'param: {:.3f}M * {}, dsps: {:.3f}M'.format(layer_idx, weight_shape, size_product, m.abit,
-                                                   m.wbit, memory_size, m.abit, m.param_size, m.wbit, dsps))
-                sum_bitops += bitops
-                sum_bita += bita
-                sum_bitw += bitw
-                sum_dsps += dsps
-                layer_idx += 1
-        return sum_bitops, sum_bita, sum_bitw, sum_dsps
+    # def fetch_arch_info(self):
+    fetch_arch_info = fixq_fetch_arch_info
+
+class SkyNetFloat(nn.Module):
+    def __init__(self):
+        super(SkyNetFloat, self).__init__()
+    
+        self.header = torch.IntTensor([0,0,0,0])
+        self.seen = 0
+        
+        self.reorg = ReorgLayer(stride=2)
+        def conv_dw(inp, oup, stride):
+            return nn.Sequential(
+                nn.Conv2d(inp, inp, 3, stride, 1, groups=inp, bias=False),
+                nn.BatchNorm2d(inp),
+                nn.ReLU6(inplace=True),
+                
+                nn.Conv2d(inp, oup, 1, 1, 0, bias=False),
+                nn.BatchNorm2d(oup),
+                nn.ReLU6(inplace=True),
+            )
+        self.layers = nn.Sequential(
+            conv_dw( 3,  48, 1),    #dw1
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            conv_dw( 48,  96, 1),   #dw2
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            conv_dw( 96, 192, 1),   #dw3
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            conv_dw(192, 384, 1),   #dw4
+            conv_dw(384, 512, 1),   #dw5
+            conv_dw(512, 96, 1),
+            nn.Conv2d(96, 36, 1, 1,bias=False),
+        )
+        self.yololayer = YOLOLayer([[20,20], [20,20], [20,20], [20,20], [20,20], [20,20]])
+
+        self.yolo_layers = [self.yololayer]
+
+    def forward(self, x):
+        img_size = x.shape[-2:]
+        yolo_out, out = [], []
+
+        x = self.layers(x)
+        x = self.yololayer(x, img_size)
+
+        yolo_out.append(x)
+
+        if self.training:  # train
+            return yolo_out
+        else:  # test
+            io, p = zip(*yolo_out)  # inference output, training output
+            return torch.cat(io, 1), p
+        return x
+
+class SkyNet_FixQ(nn.Module):
+    def __init__(self, bitw='', bita=''):
+        super(SkyNet_FixQ, self).__init__()
+        self.conv_func = qm.QuantActivConv2d
+        conv_func = self.conv_func
+        
+        assert(len(bitw)==0 or len(bitw)==13)
+        assert(len(bita)==0 or len(bita)==13)
+        if len(bitw)==0: bitw='5'*13
+        if len(bita)==0: bita='8'*13
+        if isinstance(bitw, str):
+            bitw=list(map(int, bitw))
+        if isinstance(bita, str):
+            bita=list(map(int, bita))
+
+        self.bitw = bitw
+        self.bita = bita
+        self.model_params = {'bitw': bitw, 'bita': bita}
+
+        channels = [3,48,96,192,384,512,96]
+
+        layers = []
+        for i in range(6):
+            inp, oup = channels[i], channels[i+1]
+            layers.append(conv_func(
+                inp, inp, kernel_size=3, stride=1, padding=1, bias=False, groups = inp,
+                ActQ = qm.ImageInputQ if i==0 else qm.HWGQ, wbit=bitw[i*2], abit=bita[i*2])) # dwconv
+            layers.append(nn.BatchNorm2d(channels[i]))
+
+            layers.append(conv_func(
+                inp, oup, kernel_size=1, stride=1, padding=0, bias=False, 
+                wbit=bitw[i*2+1], abit=bita[i*2+1])) # pwconv
+
+            layers.append(nn.BatchNorm2d(channels[i+1]))
+
+            if i<3:
+                layers.append(nn.MaxPool2d(kernel_size=2, stride=2))
+
+        layers.append(conv_func(
+                channels[-1], 36, kernel_size=1, stride=1, padding=0, bias=False, 
+                wbit=bitw[-1], abit=bita[-1]))
+
+        self.layers = nn.Sequential(*layers)
+
+        self.yololayer = YOLOLayer([[20,20], [20,20], [20,20], [20,20], [20,20], [20,20]])
+        self.yolo_layers = [self.yololayer]
+
+    def forward(self, x):
+        img_size = x.shape[-2:]
+        
+        x = self.layers(x)
+        p = self.yololayer(x, img_size) # train: p; test: (io, p)
+
+        if self.training:  # train
+            return [p]
+        else:  # test
+            return p[0], (p[1],) # inference output, training output
+
+    # def fetch_arch_info(self):
+    fetch_arch_info = fixq_fetch_arch_info
+
+class SkyNetk5_FixQ(nn.Module):
+    def __init__(self, bitw = '5555555555555', bita = '8888888888888'):
+        super(SkyNetk5_FixQ, self).__init__()
+        self.conv_func = qm.QuantActivConv2d
+        conv_func = self.conv_func
+        
+        assert(len(bitw)==0 or len(bitw)==13)
+        assert(len(bita)==0 or len(bita)==13)
+        if len(bitw)==0: bitw='5'*13
+        if len(bita)==0: bita='8'*13
+        if isinstance(bitw, str):
+            bitw=list(map(int, bitw))
+        if isinstance(bita, str):
+            bita=list(map(int, bita))
+
+        self.bitw = bitw
+        self.bita = bita
+        self.model_params = {'bitw': bitw, 'bita': bita}
+
+        channels = [3,48,96,192,384,512,96]
+
+        layers = []
+        for i in range(6):
+            inp, oup = channels[i], channels[i+1]
+            layers.append(conv_func(
+                inp, inp, kernel_size=5, stride=1, padding=2, bias=False, groups = inp,
+                ActQ = qm.ImageInputQ if i==0 else qm.HWGQ, wbit=bitw[i*2], abit=bita[i*2])) # dwconv
+            layers.append(nn.BatchNorm2d(channels[i]))
+
+            layers.append(conv_func(
+                inp, oup, kernel_size=1, stride=1, padding=0, bias=False, 
+                wbit=bitw[i*2+1], abit=bita[i*2+1])) # pwconv
+
+            layers.append(nn.BatchNorm2d(channels[i+1]))
+
+            if i<3:
+                layers.append(nn.MaxPool2d(kernel_size=2, stride=2))
+
+        layers.append(conv_func(
+                channels[-1], 36, kernel_size=1, stride=1, padding=0, bias=False, 
+                wbit=bitw[-1], abit=bita[-1]))
+
+        self.layers = nn.Sequential(*layers)
+
+        self.yololayer = YOLOLayer([[20,20], [20,20], [20,20], [20,20], [20,20], [20,20]])
+        self.yolo_layers = [self.yololayer]
+
+    def forward(self, x):
+        img_size = x.shape[-2:]
+        
+        x = self.layers(x)
+        p = self.yololayer(x, img_size) # train: p; test: (io, p)
+
+        if self.training:  # train
+            return [p]
+        else:  # test
+            return p[0], (p[1],) # inference output, training output
+
+    # def fetch_arch_info(self):
+    fetch_arch_info = fixq_fetch_arch_info
+
+class SkyNetk5Float(nn.Module):
+    def __init__(self):
+        super(SkyNetk5Float, self).__init__()
+    
+        self.header = torch.IntTensor([0,0,0,0])
+        self.seen = 0
+        
+        self.reorg = ReorgLayer(stride=2)
+        def conv_dw(inp, oup, stride):
+            return nn.Sequential(
+                nn.Conv2d(inp, inp, 5, stride, 2, groups=inp, bias=False),
+                nn.BatchNorm2d(inp),
+                nn.ReLU6(inplace=True),
+                
+                nn.Conv2d(inp, oup, 1, 1, 0, bias=False),
+                nn.BatchNorm2d(oup),
+                nn.ReLU6(inplace=True),
+            )
+        self.layers = nn.Sequential(
+            conv_dw( 3,  48, 1),    #dw1
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            conv_dw( 48,  96, 1),   #dw2
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            conv_dw( 96, 192, 1),   #dw3
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            conv_dw(192, 384, 1),   #dw4
+            conv_dw(384, 512, 1),   #dw5
+            conv_dw(512, 96, 1),
+            nn.Conv2d(96, 36, 1, 1,bias=False),
+        )
+        self.yololayer = YOLOLayer([[20,20], [20,20], [20,20], [20,20], [20,20], [20,20]])
+
+        self.yolo_layers = [self.yololayer]
+
+    def forward(self, x):
+        img_size = x.shape[-2:]
+        yolo_out, out = [], []
+
+        x = self.layers(x)
+        x = self.yololayer(x, img_size)
+
+        yolo_out.append(x)
+
+        if self.training:  # train
+            return yolo_out
+        else:  # test
+            io, p = zip(*yolo_out)  # inference output, training output
+            return torch.cat(io, 1), p
+        return x
+
+class SkyNetBypassFloat(nn.Module):
+    def __init__(self):
+        super(SkyNetBypassFloat, self).__init__()
+    
+        self.header = torch.IntTensor([0,0,0,0])
+        self.seen = 0
+        
+        self.reorg = ReorgLayer(stride=2)
+        def conv_dw(inp, oup, stride):
+            return nn.Sequential(
+                nn.Conv2d(inp, inp, 3, stride, 1, groups=inp, bias=False),
+                nn.BatchNorm2d(inp),
+                nn.ReLU6(inplace=True),
+                
+                nn.Conv2d(inp, oup, 1, 1, 0, bias=False),
+                nn.BatchNorm2d(oup),
+                nn.ReLU6(inplace=True),
+            )
+        self.model_p1 = nn.Sequential(
+            conv_dw( 3,  48, 1),    #dw1
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            conv_dw( 48,  96, 1),   #dw2
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            conv_dw( 96, 192, 1),   #dw3
+        )    
+        self.model_p2 = nn.Sequential(    
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            conv_dw(192, 384, 1),   #dw4
+            conv_dw(384, 512, 1),   #dw5
+        )
+        self.model_p3 = nn.Sequential(  #cat dw3(ch:192 -> 768) and dw5(ch:512)
+            conv_dw(1280, 96, 1),
+            nn.Conv2d(96, 36, 1, 1,bias=False),
+        )
+        self.yololayer = YOLOLayer([[20,20], [20,20], [20,20], [20,20], [20,20], [20,20]])
+
+        self.yolo_layers = [self.yololayer]
+        # self._initialize_weights()
+
+    def forward(self, x):
+        img_size = x.shape[-2:]
+        yolo_out, out = [], []
+
+        x_p1 = self.model_p1(x)
+        x_p1_reorg = self.reorg(x_p1)
+        x_p2 = self.model_p2(x_p1)
+        x_p3_in = torch.cat([x_p1_reorg, x_p2], 1)
+        x = self.model_p3(x_p3_in)
+        x = self.yololayer(x, img_size)
+
+        yolo_out.append(x)
+
+        if self.training:  # train
+            return yolo_out
+        else:  # test
+            io, p = zip(*yolo_out)  # inference output, training output
+            return torch.cat(io, 1), p
+        return x

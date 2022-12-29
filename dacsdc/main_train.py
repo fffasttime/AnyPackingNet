@@ -13,6 +13,7 @@ from datasets import *
 from yolo_utils import *
 
 from mymodel import *
+import mymodel
 
 wdir = 'weights' + os.sep  # weights dir
 
@@ -62,10 +63,13 @@ def train():
     results_file = 'results/%s.txt'%opt.name
 
     # Initialize model
-    if opt.bypass:
-        model = UltraNetBypass_FixQ(opt.bitw, opt.bita).to(device)
+    if opt.model != '':
+        model = getattr(mymodel, opt.model)(opt.bitw, opt.bita).to(device)
     else:
-        model = UltraNet_FixQ(opt.bitw, opt.bita).to(device)
+        if opt.bypass:
+            model = UltraNetBypass_FixQ(opt.bitw, opt.bita).to(device)
+        else:
+            model = UltraNet_FixQ(opt.bitw, opt.bita).to(device)\
 
     # Optimizer
     pg0, pg1, pg2 = [], [], []  # optimizer parameter groups
@@ -120,7 +124,7 @@ def train():
         del chkpt
 
     # Scheduler https://github.com/ultralytics/yolov3/issues/238
-    lf = lambda x: (1 + math.cos(x * math.pi / epochs)) / 2 * 0.99 + 0.01  # cosine https://arxiv.org/pdf/1812.01187.pdf
+    lf = lambda x: (1 + math.cos(x * math.pi / epochs)) / 2 * 0.999 + 0.001  # cosine https://arxiv.org/pdf/1812.01187.pdf
     scheduler = lr_scheduler.LambdaLR(optimizer, lr_lambda=lf)
     scheduler.last_epoch = start_epoch
 
@@ -221,7 +225,7 @@ def train():
                 return results
 
             # Scale loss by nominal batch_size of 64
-            loss *= 0.25
+            loss *= batch_size / 64
 
             loss.backward()
 
@@ -316,6 +320,7 @@ if __name__ == '__main__':
     parser.add_argument('--bitw', type=str, default='')
     parser.add_argument('--bita', type=str, default='')
     parser.add_argument('--var', type=float, help='debug variable')
+    parser.add_argument('--model', type=str, default='', help='use specific model')
   
     opt = parser.parse_args()
     last = wdir + 'last_%s.pt'%opt.name

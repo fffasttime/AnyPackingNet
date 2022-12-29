@@ -123,6 +123,8 @@ class ImageInputQ(nn.Module):
         self.step = 1/2**bit
 
     def forward(self, x):
+        if self.step==32:
+            return out
         out = torch.floor(x/self.step) * self.step  # [!] There will be no gradient on x
         return out
 
@@ -132,7 +134,7 @@ class QuantConv2d(nn.Conv2d):
         self.bit = kwargs.pop('bit', 1)
         super(QuantConv2d, self).__init__(*kargs, **kwargs)
         assert self.bit > 0
-        self.step = gaussian_steps[self.bit]
+        self.step = None if self.bit==32 else gaussian_steps[self.bit]
 
     def forward(self, input):
         # quantized conv, otherwise regular

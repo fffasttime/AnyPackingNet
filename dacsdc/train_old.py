@@ -12,6 +12,7 @@ from datasets import *
 from yolo_utils import *
 
 from mymodel import *
+import mymodel
 
 wdir = 'weights' + os.sep  # weights dir
 
@@ -73,18 +74,7 @@ def train():
         os.remove(f)
 
     # Initialize model
-    # model = Darknet(cfg, arc=opt.arc).to(device)
-    model = UltraNetBypassFloat().to(device)
-    # model = SkyNet().to(device)
-    # model = TempNet().to(device)
-    # model = TempNetDW().to(device)
-    # model = TempNetQua().to(device)
-    # model = SqueezeNetQua().to(device)
-    # model = UltraNet_Cang().to(device)
-    # model = UltraNet21().to(device)
-    # model = UltraNet_BypassFull().to(device)
-    # model = UltraNet_Bypass().to(device)
-    # model = ACNet().to(device)
+    model = getattr(mymodel, opt.model)().to(device)
 
     # Optimizer
     pg0, pg1, pg2 = [], [], []  # optimizer parameter groups
@@ -403,6 +393,7 @@ if __name__ == '__main__':
     parser.add_argument('--name', default='', help='renames results.txt to results_name.txt if supplied')
     parser.add_argument('--device', default='', help='device id (i.e. 0 or 0,1 or cpu)')
     parser.add_argument('--adam', action='store_true', help='use adam optimizer')
+    parser.add_argument('--model', type=str, default='UltraNetFloat', help='model used')
     parser.add_argument('--single-cls', action='store_true', help='train as single-class dataset')
     parser.add_argument('--var', type=float, help='debug variable')
     opt = parser.parse_args()
