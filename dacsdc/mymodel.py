@@ -71,7 +71,16 @@ def fixq_fetch_arch_info(self):
             bitops = size_product * m.abit * m.wbit
             bita = m.memory_size.item() * m.abit
             bitw = m.param_size * m.wbit
-            dsps = size_product / qm.dsp_factors[m.wbit-2][m.abit-2]
+            if m.kernel_size == 1:
+                dsp_factors = qm.dsp_factors_k11
+            elif m.kernel_size == 3:
+                dsp_factors = qm.dsp_factors_k33
+            elif m.kernel_size == 5:
+                dsp_factors = qm.dsp_factors_k55
+            else:
+                raise NotImplementedError
+
+            dsps = size_product / dsp_factors[m.wbit-2][m.abit-2]
             weight_shape = list(m.conv.weight.shape)
             print('idx {} with shape {}, bitops: {:.3f}M * {} * {}, memory: {:.3f}K * {}, '
                     'param: {:.3f}M * {}, dsps: {:.3f}M'.format(layer_idx, weight_shape, size_product, m.abit,
@@ -790,6 +799,114 @@ class SkyNetFloat(nn.Module):
             io, p = zip(*yolo_out)  # inference output, training output
             return torch.cat(io, 1), p
         return x
+
+class SkyNet_MixQ(nn.Module):
+    def __init__(self, share_weight = False):
+        super(SkyNet_MixQ, self).__init__()
+
+        self.conv_func = qm.MixActivConv2d
+        conv_func = self.conv_func
+
+        qspace = {'wbits':[2,3,4,5,6,7,8], 'abits':[2,3,4,5,6,7,8], 'share_weight':share_weight}
+
+        channels = [3,48,96,192,384,512,96]
+
+        layers = []
+        for i in range(6):
+            inp, oup = channels[i], channels[i+1]
+            layers.append(conv_func(
+                inp, inp, kernel_size=3, stride=1, padding=1, bias=False, groups = inp,
+                ActQ = qm.ImageInputQ if i==0 else qm.HWGQ, **qspace)) # dwconv
+            layers.append(nn.BatchNorm2d(channels[i]))
+
+            layers.append(conv_func(
+                inp, oup, kernel_size=1, stride=1, padding=0, bias=False, 
+                **qspace)) # pwconv
+
+            layers.append(nn.BatchNorm2d(channels[i+1]))
+
+            if i<3:
+                layers.append(nn.MaxPool2d(kernel_size=2, stride=2))
+
+        layers.append(conv_func(
+                channels[-1], 36, kernel_size=1, stride=1, padding=0, bias=False, 
+                **qspace))
+
+        self.layers = nn.Sequential(*layers)
+
+        self.yololayer = YOLOLayer([[20,20], [20,20], [20,20], [20,20], [20,20], [20,20]])
+        self.yolo_layers = [self.yololayer]
+
+    def forward(self, x):
+        img_size = x.shape[-2:]
+        
+        x = self.layers(x)
+        p = self.yololayer(x, img_size) # train: p; test: (io, p)
+
+        if self.training:  # train
+            return [p]
+        else:  # test
+            return p[0], (p[1],) # inference output, training output
+
+    # def fetch_best_arch(self):
+    fetch_best_arch = mixq_fetch_best_arch
+
+    # def complexity_loss(self):
+    complexity_loss= mixq_complexity_loss
+
+class SkyNetk5_MixQ(nn.Module):
+    def __init__(self, share_weight = False):
+        super(SkyNetk5_MixQ, self).__init__()
+
+        self.conv_func = qm.MixActivConv2d
+        conv_func = self.conv_func
+
+        qspace = {'wbits':[2,3,4,5,6,7,8], 'abits':[2,3,4,5,6,7,8], 'share_weight':share_weight}
+
+        channels = [3,48,96,192,384,512,96]
+
+        layers = []
+        for i in range(6):
+            inp, oup = channels[i], channels[i+1]
+            layers.append(conv_func(
+                inp, inp, kernel_size=5, stride=1, padding=2, bias=False, groups = inp,
+                ActQ = qm.ImageInputQ if i==0 else qm.HWGQ, **qspace)) # dwconv
+            layers.append(nn.BatchNorm2d(channels[i]))
+
+            layers.append(conv_func(
+                inp, oup, kernel_size=1, stride=1, padding=0, bias=False, 
+                **qspace)) # pwconv
+
+            layers.append(nn.BatchNorm2d(channels[i+1]))
+
+            if i<3:
+                layers.append(nn.MaxPool2d(kernel_size=2, stride=2))
+
+        layers.append(conv_func(
+                channels[-1], 36, kernel_size=1, stride=1, padding=0, bias=False, 
+                **qspace))
+
+        self.layers = nn.Sequential(*layers)
+
+        self.yololayer = YOLOLayer([[20,20], [20,20], [20,20], [20,20], [20,20], [20,20]])
+        self.yolo_layers = [self.yololayer]
+
+    def forward(self, x):
+        img_size = x.shape[-2:]
+        
+        x = self.layers(x)
+        p = self.yololayer(x, img_size) # train: p; test: (io, p)
+
+        if self.training:  # train
+            return [p]
+        else:  # test
+            return p[0], (p[1],) # inference output, training output
+
+    # def fetch_best_arch(self):
+    fetch_best_arch = mixq_fetch_best_arch
+
+    # def complexity_loss(self):
+    complexity_loss= mixq_complexity_loss
 
 class SkyNet_FixQ(nn.Module):
     def __init__(self, bitw='', bita=''):

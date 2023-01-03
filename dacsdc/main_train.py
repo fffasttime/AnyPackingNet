@@ -69,7 +69,7 @@ def train():
         if opt.bypass:
             model = UltraNetBypass_FixQ(opt.bitw, opt.bita).to(device)
         else:
-            model = UltraNet_FixQ(opt.bitw, opt.bita).to(device)\
+            model = UltraNet_FixQ(opt.bitw, opt.bita).to(device)
 
     # Optimizer
     pg0, pg1, pg2 = [], [], []  # optimizer parameter groups

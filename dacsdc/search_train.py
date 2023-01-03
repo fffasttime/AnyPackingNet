@@ -12,6 +12,7 @@ from datasets import *
 from yolo_utils import *
 
 from mymodel import *
+import mymodel
 
 wdir = 'weights' + os.sep  # weights dir
 
@@ -61,10 +62,13 @@ def train():
     results_file = 'results/%s.txt'%opt.name
 
     # Initialize model
-    if opt.bypass:
-        model = UltraNetBypass_MixQ(not opt.no_share).to(device)
+    if opt.model != '':
+        model = getattr(mymodel, opt.model)(not opt.no_share).to(device)
     else:
-        model = UltraNet_MixQ(not opt.no_share).to(device)
+        if opt.bypass:
+            model = UltraNetBypass_MixQ(not opt.no_share).to(device)
+        else:
+            model = UltraNet_MixQ(not opt.no_share).to(device)
 
     # Optimizer
     pg0, pg1, pg2 = [], [], []  # optimizer parameter groups
@@ -128,11 +132,12 @@ def train():
         del chkpt
 
     # Scheduler https://github.com/ultralytics/yolov3/issues/238
-    lf = lambda x: (1 + math.cos(x * math.pi / epochs)) / 2 * 0.99 + 0.01  # cosine https://arxiv.org/pdf/1812.01187.pdf
+    lf = lambda x: (1 + math.cos(x * math.pi / epochs)) / 2 * 0.999 + 0.001  # cosine https://arxiv.org/pdf/1812.01187.pdf
+    lf2 = lambda x: (1 + math.cos(x * math.pi / epochs)) / 2 * 0.9 + 0.1  # cosine https://arxiv.org/pdf/1812.01187.pdf
     scheduler = lr_scheduler.LambdaLR(optimizer, lr_lambda=lf)
     scheduler.last_epoch = start_epoch
 
-    arch_scheduler = lr_scheduler.LambdaLR(arch_optimizer, lr_lambda=lf)
+    arch_scheduler = lr_scheduler.LambdaLR(arch_optimizer, lr_lambda=lf2)
     arch_scheduler.last_epoch = start_epoch
 
     # Initialize distributed training
@@ -230,7 +235,7 @@ def train():
                 return results
 
             # Scale loss by nominal batch_size of 64
-            loss *= 0.25
+            loss *= batch_size / 64
 
             # complexity penalty
             if opt.complexity_decay != 0:
@@ -238,7 +243,7 @@ def train():
                     loss_complexity = opt.complexity_decay * model.module.complexity_loss()
                 else:
                     loss_complexity = opt.complexity_decay * model.complexity_loss()
-                loss += loss_complexity
+                loss += loss_complexity * 4.0
             
             loss.backward()
 
@@ -266,8 +271,8 @@ def train():
             bitops, bita, bitw, dsps))
         print('expected model with bitops: {:.3f}M, bita: {:.3f}K, bitw: {:.3f}M, dsps: {:.3f}M'.format(
             mixbitops, mixbita, mixbitw, mixdsps))
-        print(f'best_weight: {best_arch["best_weight"]}')
-        print(f'best_activ: {best_arch["best_activ"]}')
+        print(f'best_weight: {best_arch["best_weight"]}  ({"".join([str(x+2) for x in best_arch["best_weight"]])})')
+        print(f'best_activ: {best_arch["best_activ"]}  ({"".join([str(x+2) for x in best_arch["best_activ"]])})')
             
         # Update scheduler
         scheduler.step()
@@ -349,6 +354,7 @@ if __name__ == '__main__':
     parser.add_argument('--complexity-decay', '--cd', default=0, type=float, metavar='W', help='complexity decay (default: 0)')
     parser.add_argument('--lra', '--learning-rate-alpha', default=0.01, type=float, metavar='LR', help='initial alpha learning rate')
     parser.add_argument('--no-share', action='store_true', help='no share weight quantization')
+    parser.add_argument('--model', type=str, default='', help='use specific model')
     
     opt = parser.parse_args()
     last = wdir + 'last_%s.pt'%opt.name
