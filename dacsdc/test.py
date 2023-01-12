@@ -202,13 +202,20 @@ if __name__ == '__main__':
     parser.add_argument('-bs', '--batch-size', type=int, default=16, help='size of each image batch')
     parser.add_argument('--img-size', type=int, default=320, help='inference size (pixels)')
     parser.add_argument('--device', default='', help='device id (i.e. 0 or 0,1) or cpu')
-    parser.add_argument('--datapath', default='../../dacsdc_dataset', help = 'test dataset path')
+    parser.add_argument('--datapath', default='', help = 'test dataset path')
     parser.add_argument('-v', '--verbose', action='store_true', help = 'show predict value result')
     parser.add_argument('--save-pic', action='store_true', help = 'save predict output picture')
     parser.add_argument('-nb', '--num-batch', type=int, default='-1', help='num of batchs to run, -1 for full dataset')
     opt = parser.parse_args()
     print(opt)
     if opt.weight is None: opt.weight = select_weight_file()
+
+    if opt.datapath == '':
+        try:
+            import localconfig
+            opt.datapath = localconfig.test_path
+        except Exception:
+            pass
 
     # Test
     res = test(

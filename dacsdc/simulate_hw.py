@@ -21,7 +21,8 @@ class QConvLayer:
             x = F.max_pool2d(x.float(), kernel_size = 2, stride = 2).to(dtype=torch.int64)
         # print('convi', self.conv.n, x[0,0,:,0])
 
-        x = F.conv2d(x, self.w, bias=None, stride=self.conv.s, padding=self.conv.p) # [N, OCH, OROW, OCOL]
+        groups = self.conv.groups if hasattr(self.conv, 'groups') else 1
+        x = F.conv2d(x, self.w, bias=None, stride=self.conv.s, padding=self.conv.p, groups=groups) # [N, OCH, OROW, OCOL]
         # print('convo', self.conv.n, x[0,0,:,0])
         och = x.shape[1]
         if True:
@@ -136,10 +137,17 @@ if __name__=='__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-w', '--weight', help='weight folder name in ./hls/, which contians model_param.pkl')
     parser.add_argument('-bp', '--bypass', action='store_true', help='use bypass model')
-    parser.add_argument('--datapath', default='../../dacsdc_dataset', help = 'test dataset path')
+    parser.add_argument('--datapath', default='', help = 'test dataset path')
     parser.add_argument('-bs', '--batch-size', type=int, default=1, help = 'batch-size')
     parser.add_argument('-nb', '--num-batch', type=int, default=1, help = 'num of batchs to run, -1 for full dataset')
     opt = parser.parse_args()
+    
+    if opt.datapath == '':
+        try:
+            import localconfig
+            opt.datapath = localconfig.test_path
+        except Exception:
+            pass
     print(opt)
     if opt.weight is None: opt.weight = select_weight_file()
     
