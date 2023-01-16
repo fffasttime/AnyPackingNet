@@ -20,7 +20,7 @@ def write_hls_config(model_param, path):
         #'s': 'S',
         #'p': 'P',
         'ich': 'IFM_CH',
-        'irow': 'IFM_ROL',
+        'irow': 'IFM_ROW',
         'icol': 'IFM_COL',
         'och': 'OFM_CH',
         'orow': 'OFM_ROW',
@@ -50,7 +50,7 @@ def write_hls_config(model_param, path):
             if hasattr(conv_param, k): # e.g. conv_last has no incbit
                 content += f'#define {conv_param.type.upper()}_{n}_{v} {getattr(conv_param, k)}\n'
         content += '\n'
-    content += '#endif _CONFIG_H_'
+    content += '#endif'
 
     with open(path + 'config.h', 'w') as f:
         print(content, file=f)
@@ -215,7 +215,16 @@ def reorder_weight(model_param, layers_simd, layers_pe):
     '''
 
     for conv in model_param:
-        if conv.type == 'linear': # no reorder?
+        if conv.type == 'linear': #new reorder
+            pe_l = 1
+            simd_l = 1
+            in_pe_l = 8
+            w = conv.w.reshape(10, -1, 4, 4)
+            w = w.reshape(10 // (2 * pe_l), pe_l, 2, 256 // in_pe_l, in_pe_l // simd_l, simd_l, 4, 4)  #[OUT_CH/2PE, PE, 2, IN_CH/IN_PE, IN_PE/SIMD, SIMD, H, W]
+            w = w.transpose(1, 6, 3, 7, 0, 4, 5, 2)                                                    #[PE, H, IN_CH/IN_PE, W, OUT_CH/2PE, IN_PE/SIMD, SIMD, 2]
+            w = w.reshape(w.shape[0], w.shape[1], w.shape[2], w.shape[3], w.shape[4], w.shape[5], -1)  #[PE, H, IN_CH/IN_PE, W, OUT_CH/2PE, IN_PE/SIMD, SIMD * 2]
+            print(w.shape)
+            conv.w = w
             continue
 
         print(f'Reorder conv_{conv.n}, w {conv.w.shape}', end='')
@@ -272,6 +281,27 @@ def write_hls_linearlayer(layer, f):
         print_ndarray_recursion(layer.bias, hex_str, f)
         print(';', file=f)
 
+def write_hls_linearlayer_reorder(layer, d0, d1, d2, d3, d4, d5, d6, f):
+    n = layer.n
+    print(f"// layer: {n}, wbit: {layer.wbit}", file=f)
+    hex_str = lambda x: '"' + hex(x) + '"'
+    def pack1d_str(arr): # x: 1d-array
+        x = 0
+        # print(arr.shape)
+        for v in arr[::-1]: # [!] reverse simd pack, it is related to hls implemention
+            v = int(v) # use python bignumber, not np.int
+            assert -1<<layer.wbit-1 <= v < 1<<layer.wbit-1, f'got v={v} while wbit={layer.wbit}'
+            x=(x<<layer.wbit) + (v&(2**layer.wbit-1))
+        return hex_str(x)
+    print(f"const ap_uint<{layer.wbit * d6}> linear_{n}_w[{d0}][{d1}][{d2}][{d3}][{d4}][{d5}]=", file=f)
+    print_ndarray_recursion(layer.w, pack1d_str, f, stop=1)
+    print(';', file=f)
+    
+    if layer.bias is not None:
+        print(f"const ap_int<{layer.biasbit}> linear_{n}_bias[{layer.och}]=", file=f)
+        print_ndarray_recursion(layer.bias, hex_str, f)
+        print(';', file=f)
+
 def write_hls_weights(model_param, path):
     '''write_hls_weights(model_param, path)
     Write hls weights+inc+bias array code according to numpy shape.
@@ -292,7 +322,14 @@ def write_hls_weights(model_param, path):
 
     for conv in model_param:
         if conv.type == 'linear':
-            write_hls_linearlayer(conv, f)
+            pe_pr = conv.w.shape[0]
+            h_pr = conv.w.shape[1]
+            inch_inpe_pr = conv.w.shape[2]
+            w_pr = conv.w.shape[3]
+            outch_2pe_pr = conv.w.shape[4]
+            inpe_simd_pr = conv.w.shape[5]
+            simd2_pr = conv.w.shape[6]
+            write_hls_linearlayer_reorder(conv, pe_pr, h_pr, inch_inpe_pr, w_pr, outch_2pe_pr, inpe_simd_pr, simd2_pr, f)
             continue
 
         n = conv.n
@@ -329,7 +366,8 @@ def write_hls_weights(model_param, path):
     f.close()
 
 def adjust_weight(model_param):
-    special_wa_bit = ((5,6), (7,3)) # These packing can't quantize to -2**(wbit-1)
+    # special_wa_bit = ((5,6), (7,3)) # These packing can't quantize to -2**(wbit-1)
+    special_wa_bit = ((4, 2), (5, 3), (5, 4), (5, 5), (5, 6), (5, 7), (5, 8), (7, 2), (7, 3)) # These packing can't quantize to -2**(wbit-1)
     for conv in model_param:
         if (conv.wbit, conv.abit) in special_wa_bit:
             print(f'Adjust conv_{conv.n} wbit={conv.wbit}')
