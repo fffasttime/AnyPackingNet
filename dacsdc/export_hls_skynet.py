@@ -21,7 +21,7 @@ def write_hls_config(model_param, path):
         #'s': 'S',
         #'p': 'P',
         'ich': 'IFM_CH',
-        'irow': 'IFM_ROL',
+        'irow': 'IFM_ROW',
         'icol': 'IFM_COL',
         'och': 'OFM_CH',
         'orow': 'OFM_ROW',
@@ -51,7 +51,7 @@ def write_hls_config(model_param, path):
             if hasattr(conv_param, k): # e.g. conv_last has no incbit
                 content += f'#define CONV_{n}_{v} {getattr(conv_param, k)}\n'
         content += '\n'
-    content += '#endif _CONFIG_H_'
+    content += '#endif'
 
     with open(path + 'config.h', 'w') as f:
         print(content, file=f)
