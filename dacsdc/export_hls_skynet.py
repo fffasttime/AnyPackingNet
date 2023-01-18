@@ -173,7 +173,7 @@ def process_batchnorm(model_param):
     incbit = len(bit(inc)); biasbit = len(bit(bias))
     larger lshift is better, but MBIT+incbit<48
     '''
-    lshift = 16
+    lshift = 6
 
     for conv in model_param[:-1]:
         print(f'Process bn_{conv.n}, shape {conv.bn_w.shape},', end = ' ')
@@ -206,39 +206,49 @@ def process_batchnorm(model_param):
     #conv_last.biasbit = bitlength(conv_last.bias)
     #print(f'conv_last biasbit {conv_last.biasbit}, div {conv_last.div}')
 
-def reorder_weight(model_param, layers_simd, layers_pe):
+def reorder_weight(model_param, layers_simd, layers_pe, layers_actp, layers_pep):
     '''reorder_weight(model_param)
     Reorder array for hlscode.
     '''
 
-    for conv, simd, pe in zip(model_param, layers_simd, layers_pe):
+    for conv, simd, pe, actp, pep in zip(model_param, layers_simd, layers_pe, layers_actp, layers_pep):
         print(f'Reorder conv_{conv.n}, w {conv.w.shape}', end='')
         conv.simd = simd
         conv.pe = pe
+        conv.actp = actp
+        conv.pep = pep
 
         # process batchnorm
         if conv.inc is not None:
-            conv.inc = conv.inc.reshape(conv.och//conv.pe, conv.pe).T
+            conv.inc = conv.inc.reshape(conv.och//conv.actp, conv.actp).T
         if hasattr(conv, 'bias') and conv.bias is not None:
-            conv.bias = conv.bias.reshape(conv.och//conv.pe, conv.pe).T
+            conv.bias = conv.bias.reshape(conv.och//conv.actp, conv.actp).T
         
         # process conv weight
-        w = conv.w    # [och, ich, kr, kc]
-        g_ich = w.shape[1]
-        assert conv.och%conv.pe == 0, f"conv_{conv.n}, och {conv.och}, pe {conv.pe}"
-        assert conv.k*g_ich%simd == 0, f"conv_{conv.n}, ich {g_ich}, k {conv.k}, simd {conv.simd}"
+        if conv.k == 1:
+            w = conv.w    # [och, ich, kr, kc]
+            g_ich = w.shape[1]
+            assert conv.och%(conv.pe * conv.pep) == 0, f"conv_{conv.n}, och {conv.och}, pe {conv.pe}, pep {conv.pep}"
+            assert g_ich%simd == 0, f"conv_{conv.n}, ich {g_ich}, simd {conv.simd}"
 
-        # if conv.n==0: # first layer is different
-        #    w = w.transpose(0, 2, 3, 1) # [och, kr, kc, ich]
-        # else:
-        w = w.transpose(0, 3, 2, 1) # [och, kc, kr, ich]
+            w = w.reshape(conv.och//(conv.pe * conv.pep), conv.pe, conv.pep, g_ich//simd, simd) # [och / (pe * pep), pe, pep, ich / simd, simd]
+            w = w.transpose(1,0,3,4,2)  #[pe, och / (pe * pep), ich / simd, simd, pep]
+            w = w.reshape(conv.pe, -1, g_ich//simd, simd*conv.pep) # [pe, och / (pe * pep), ich / simd, simd * pep]
+            w = w.reshape(conv.pe, -1, simd*conv.pep)   # hls format [pe, och/(pe * pep) * ich/simd, simd * pep]
+        else:
+            w = conv.w    # [och, ich, kr, kc]
+            g_ich = w.shape[1]
+            assert conv.och%conv.pe == 0, f"conv_{conv.n}, och {conv.och}, pe {conv.pe}"
+            assert conv.k*g_ich%simd == 0, f"conv_{conv.n}, ich {g_ich}, k {conv.k}, simd {conv.simd}"
 
-        w = w.reshape(conv.och//conv.pe, conv.pe, conv.k, conv.k*g_ich//simd, simd)
-        w = w.transpose(1,2,0,3,4) # [pe, k, och/pe, k*ich/simd, simd]
-        w = w.reshape(conv.pe, conv.k, -1, simd) # hls format [pe, k, och/pe*k*ich/simd, simd]
+            # if conv.n==0: # first layer is different
+            #    w = w.transpose(0, 2, 3, 1) # [och, kr, kc, ich]
+            # else:
+            w = w.transpose(0, 3, 2, 1) # [och, kc, kr, ich]
 
-        if conv.k == 1: # kernel size=1
-            w = w.reshape(conv.pe, -1, simd)
+            w = w.reshape(conv.och//conv.pe, conv.pe, conv.k, conv.k*g_ich//simd, simd)
+            w = w.transpose(1,2,0,3,4) # [pe, k, och/pe, k*ich/simd, simd]
+            w = w.reshape(conv.pe, conv.k, -1, simd) # hls format [pe, k, och/pe*k*ich/simd, simd]          
     
         print(' ->', w.shape)
 
@@ -275,15 +285,6 @@ def write_hls_weights(model_param, path):
 
     for conv in model_param:
         n = conv.n
-        print(f"Write conv_{n} weight, pe {conv.pe}, simd {conv.simd}, wbit {conv.wbit}")
-        print(f"// layer: {n}, PE: {conv.pe}, SIMD: {conv.simd}, wbit: {conv.wbit}", file=f)
-
-        # print conv weight,  merge [SIMD] value into one ap_uint
-        if conv.k>1:
-            print(f"const ap_uint<{conv.wbit * conv.simd}> conv_{n}_w[{conv.pe}][{conv.k}][{conv.w.shape[2]}]=", file=f)
-        else:
-            print(f"const ap_uint<{conv.wbit * conv.simd}> conv_{n}_w[{conv.pe}][{conv.w.shape[1]}]=", file=f)
-        hex_str = lambda x: '"' + hex(x) + '"'
         def pack1d_str(arr): # x: 1d-array
             x = 0
             for v in arr[::-1]: # [!] reverse simd pack, it is related to hls implemention
@@ -291,16 +292,33 @@ def write_hls_weights(model_param, path):
                 assert -1<<conv.wbit-1 <= v < 1<<conv.wbit-1, f'got v={v} while wbit={conv.wbit}'
                 x=(x<<conv.wbit) + (v&(2**conv.wbit-1))
             return hex_str(x)
-        print_ndarray_recursion(conv.w, pack1d_str, f, stop=1)
-        print(';', file=f)
+
+        if conv.k == 1:
+            print(f"Write conv_{n} weight, pe {conv.pe}, pep{conv.pep}, simd {conv.simd}, actp {conv.actp}, wbit {conv.wbit}")
+            print(f"// layer: {n}, PE: {conv.pe}, PEP: {conv.pep}, SIMD: {conv.simd}, ACTP: {conv.actp}, wbit: {conv.wbit}", file=f)
+
+            # print conv weight,  merge [SIMD] value into one ap_uint
+            print(f"const ap_uint<{conv.wbit * conv.pep * conv.simd}> conv_{n}_w[{conv.pe}][{conv.w.shape[1]}]=", file=f)
+            hex_str = lambda x: '"' + hex(x) + '"'
+            print_ndarray_recursion(conv.w, pack1d_str, f, stop=1)
+            print(';', file=f)
+        else:
+            print(f"Write conv_{n} weight, pe {conv.pe}, simd {conv.simd}, actp {conv.actp}, wbit {conv.wbit}")
+            print(f"// layer: {n}, PE: {conv.pe}, SIMD: {conv.simd}, ACTP: {conv.actp}, wbit: {conv.wbit}", file=f)
+
+            # print conv weight,  merge [SIMD] value into one ap_uint
+            print(f"const ap_uint<{conv.wbit * conv.simd}> conv_{n}_w[{conv.pe}][{conv.k}][{conv.w.shape[2]}]=", file=f)
+            hex_str = lambda x: '"' + hex(x) + '"'
+            print_ndarray_recursion(conv.w, pack1d_str, f, stop=1)
+            print(';', file=f)
 
         # print inc, bias
         if conv.inc is not None:
-            print(f"const ap_int<{conv.incbit}> conv_{n}_inc[{conv.pe}][{conv.och//conv.pe}]=", file=f)
+            print(f"const ap_int<{conv.incbit}> conv_{n}_inc[{conv.actp}][{conv.och//conv.actp}]=", file=f)
             print_ndarray_recursion(conv.inc, hex_str, f)
             print(';', file=f)
         if hasattr(conv, 'bias') and conv.bias is not None:
-            print(f"const ap_int<{conv.biasbit}> conv_{n}_bias[{conv.pe}][{conv.och//conv.pe}]=", file=f)
+            print(f"const ap_int<{conv.biasbit}> conv_{n}_bias[{conv.actp}][{conv.och//conv.actp}]=", file=f)
             print_ndarray_recursion(conv.bias, hex_str, f)
             print(';', file=f)
     
@@ -338,6 +356,6 @@ if __name__=='__main__':
     process_batchnorm(model_param) # get bn param before write hls config
     torch.save(model_param, dir_output + 'model_param.pkl')
     
-    reorder_weight(model_param, simd_pe[:,0], simd_pe[:,1]) # get pe, simd param before write hls config
+    reorder_weight(model_param, simd_pe[:,0], simd_pe[:,1], simd_pe[:,2], simd_pe[:,3]) # get pe, simd, actp, pep param before write hls config
     write_hls_config(model_param, dir_output)
     write_hls_weights(model_param, dir_output)
