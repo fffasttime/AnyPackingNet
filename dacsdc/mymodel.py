@@ -58,7 +58,7 @@ class YOLOLayer(nn.Module):
             return io.view(bs, -1, self.no), p
 
 def fixq_fetch_arch_info(self):
-    sum_bitops, sum_bita, sum_bitw, sum_dsps = 0, 0, 0, 0
+    sum_bitops, sum_bita, sum_bitw, sum_dsps, sum_bram = 0, 0, 0, 0, 0
     layer_idx = 0
     for m in self.modules():
         if isinstance(m, self.conv_func):
@@ -79,27 +79,36 @@ def fixq_fetch_arch_info(self):
                 dsp_factors = qm.dsp_factors_k55
             else:
                 raise NotImplementedError
+            
+            if m.kernel_size == 1:
+                bram_sw = 2 * m.in_width.item() * m.inplane
+            else:
+                bram_sw = (m.kernel_size+1)*m.in_width.item()*m.inplane
+            bram_sw *= 1e-3
 
             dsps = size_product / dsp_factors[m.wbit-2][m.abit-2]
             weight_shape = list(m.conv.weight.shape)
             print('idx {} with shape {}, bitops: {:.3f}M * {} * {}, memory: {:.3f}K * {}, '
-                    'param: {:.3f}M * {}, dsps: {:.3f}M'.format(layer_idx, weight_shape, size_product, m.abit,
-                                                m.wbit, memory_size, m.abit, m.param_size, m.wbit, dsps))
+                    'param: {:.3f}M * {}, dsps: {:.3f}M, bram(wa|waf):({:.2f},{:.2f}|{:.1f},{:.1f},{:.1f})K'.format(layer_idx, weight_shape, size_product, m.abit,
+                                                m.wbit, memory_size, m.abit, m.param_size, m.wbit, dsps,
+                                                m.param_size * 1e3, bram_sw, bitw*1e3, bram_sw*m.abit, bitw*1e3 + bram_sw*m.abit))
             sum_bitops += bitops
             sum_bita += bita
             sum_bitw += bitw
             sum_dsps += dsps
+            sum_bram += bitw*1e3 + bram_sw*m.abit
             layer_idx += 1
-    return sum_bitops, sum_bita, sum_bitw, sum_dsps
+    return sum_bitops, sum_bita, sum_bitw, sum_dsps, sum_bram
 
 def mixq_fetch_best_arch(self):
     sum_bitops, sum_bita, sum_bitw, sum_dsps = 0, 0, 0, 0
     sum_mixbitops, sum_mixbita, sum_mixbitw, sum_mixdsps = 0, 0, 0, 0
+    sum_mixbram_weight, sum_mixbram_cache = 0, 0
     layer_idx = 0
     best_arch = None
     for m in self.modules():
         if isinstance(m, self.conv_func):
-            layer_arch, bitops, bita, bitw, mixbitops, mixbita, mixbitw, dsps, mixdsps = m.fetch_best_arch(layer_idx)
+            layer_arch, bitops, bita, bitw, mixbitops, mixbita, mixbitw, dsps, mixdsps, mixbram_weight, mixbram_cache = m.fetch_best_arch(layer_idx)
             if best_arch is None:
                 best_arch = layer_arch
             else:
@@ -116,8 +125,10 @@ def mixq_fetch_best_arch(self):
             sum_mixbitw += mixbitw
             sum_dsps += dsps
             sum_mixdsps += mixdsps
+            sum_mixbram_weight += mixbram_weight
+            sum_mixbram_cache += mixbram_cache
             layer_idx += 1
-    return best_arch, sum_bitops, sum_bita, sum_bitw, sum_mixbitops, sum_mixbita, sum_mixbitw, sum_dsps, sum_mixdsps
+    return best_arch, sum_bitops, sum_bita, sum_bitw, sum_mixbitops, sum_mixbita, sum_mixbitw, sum_dsps, sum_mixdsps, sum_mixbram_weight, sum_mixbram_cache
 
 def mixq_complexity_loss(self):
     size_product = []
@@ -127,6 +138,17 @@ def mixq_complexity_loss(self):
             loss += m.complexity_loss()
             size_product += [m.size_product]
     normalizer = size_product[0].item()
+    loss /= normalizer
+    return loss
+
+def mixq_bram_loss(self):
+    memory_sizes = []
+    loss = 0
+    for m in self.modules():
+        if isinstance(m, self.conv_func):
+            loss += m.bram_loss()
+            memory_sizes += [m.memory_size.item()]
+    normalizer = memory_sizes[0]
     loss /= normalizer
     return loss
 
@@ -346,6 +368,7 @@ class UltraNet_MixQ(nn.Module):
 
     # def complexity_loss(self):
     complexity_loss= mixq_complexity_loss
+    bram_loss = mixq_bram_loss
 
 class UltraNet_FixQ(nn.Module):
     def __init__(self, bitw = '444444444', bita = '444444444'):
@@ -663,6 +686,7 @@ class UltraNetBypass_MixQ(nn.Module):
 
     # def complexity_loss(self):
     complexity_loss= mixq_complexity_loss
+    bram_loss = mixq_bram_loss
 
 class UltraNetBypass_FixQ(nn.Module):
     def __init__(self, bitw = '444444444', bita = '444444444'):
@@ -853,6 +877,7 @@ class SkyNet_MixQ(nn.Module):
 
     # def complexity_loss(self):
     complexity_loss= mixq_complexity_loss
+    bram_loss = mixq_bram_loss
 
 class SkyNetk5_MixQ(nn.Module):
     def __init__(self, share_weight = False):
@@ -907,6 +932,7 @@ class SkyNetk5_MixQ(nn.Module):
 
     # def complexity_loss(self):
     complexity_loss= mixq_complexity_loss
+    bram_loss = mixq_bram_loss
 
 class SkyNet_FixQ(nn.Module):
     def __init__(self, bitw='', bita=''):

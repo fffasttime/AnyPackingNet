@@ -245,6 +245,13 @@ def train():
                     loss_complexity = opt.complexity_decay * model.complexity_loss()
                 loss += loss_complexity * 4.0
             
+            if opt.bram_decay != 0:
+                if hasattr(model, 'module'):
+                    loss_bram = opt.bram_decay * model.module.bram_loss()
+                else:
+                    loss_bram = opt.bram_decay * model.bram_loss()
+                loss += loss_bram * 4.0
+
             loss.backward()
 
             # Optimize accumulated gradient
@@ -264,13 +271,13 @@ def train():
 
         print('========= architecture =========')
         if hasattr(model, 'module'):
-            best_arch, bitops, bita, bitw, mixbitops, mixbita, mixbitw, dsps, mixdsps = model.module.fetch_best_arch()
+            best_arch, bitops, bita, bitw, mixbitops, mixbita, mixbitw, dsps, mixdsps, mixbram_weight, mixbram_cache = model.module.fetch_best_arch()
         else:
-            best_arch, bitops, bita, bitw, mixbitops, mixbita, mixbitw, dsps, mixdsps  = model.fetch_best_arch()
+            best_arch, bitops, bita, bitw, mixbitops, mixbita, mixbitw, dsps, mixdsps, mixbram_weight, mixbram_cache  = model.fetch_best_arch()
         print('best model with bitops: {:.3f}M, bita: {:.3f}K, bitw: {:.3f}M, dsps: {:.3f}M'.format(
             bitops, bita, bitw, dsps))
-        print('expected model with bitops: {:.3f}M, bita: {:.3f}K, bitw: {:.3f}M, dsps: {:.3f}M'.format(
-            mixbitops, mixbita, mixbitw, mixdsps))
+        print('expected model with bitops: {:.3f}M, bita: {:.3f}K, bitw: {:.3f}M, dsps: {:.3f}M, bram_wa:({:.3f},{:.3f})K'.format(
+            mixbitops, mixbita, mixbitw, mixdsps, mixbram_weight, mixbram_cache))
         print(f'best_weight: {best_arch["best_weight"]}  ({"".join([str(x+2) for x in best_arch["best_weight"]])})')
         print(f'best_activ: {best_arch["best_activ"]}  ({"".join([str(x+2) for x in best_arch["best_activ"]])})')
             
@@ -352,6 +359,7 @@ if __name__ == '__main__':
     parser.add_argument('--single-cls', action='store_true', help='train as single-class dataset')
     parser.add_argument('--var', type=float, help='debug variable')
     parser.add_argument('--complexity-decay', '--cd', default=0, type=float, metavar='W', help='complexity decay (default: 0)')
+    parser.add_argument('--bram-decay', '--bd', default=0, type=float, metavar='W', help='complexity decay (default: 0)')
     parser.add_argument('--lra', '--learning-rate-alpha', default=0.01, type=float, metavar='LR', help='initial alpha learning rate')
     parser.add_argument('--no-share', action='store_true', help='no share weight quantization')
     parser.add_argument('--model', type=str, default='', help='use specific model')

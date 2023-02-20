@@ -152,6 +152,13 @@ def train():
                                              num_workers=0,
                                              pin_memory=True,
                                              collate_fn=testset.collate_fn)
+    
+    test.test(batch_size=batch_size,
+                                img_size=img_size_test,
+                                model=model,
+                                dataloader=testloader) # make forward
+    bops, bita, bitw, dsps, brams = model.fetch_arch_info()
+    print('model with bops: {:.3f}M, bita: {:.3f}K, bitw: {:.3f}M, dsps: {:.3f}M, bram: {:.3f}K'.format(bops, bita, bitw, dsps, brams))
 
     # Dataset
     dataset = LoadImagesAndLabels(train_path, img_size, batch_size,
@@ -181,13 +188,6 @@ def train():
     torch_utils.model_info(model, report='summary')  # 'full' or 'summary'
     print('Using %g dataloader workers' % nw)
     print('Starting training for %g epochs...' % epochs)
-
-    test.test(batch_size=batch_size,
-                                img_size=img_size_test,
-                                model=model,
-                                dataloader=testloader) # make forward
-    bops, bita, bitw, dsps = model.fetch_arch_info()
-    print('model with bops: {:.3f}M, bita: {:.3f}K, bitw: {:.3f}M, dsps: {:.3f}M'.format(bops, bita, bitw, dsps))
             
     for epoch in range(start_epoch, epochs):  # epoch ------------------------------------------------------------------
         model.train()

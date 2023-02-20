@@ -209,10 +209,14 @@ class QuantActivConv2d(nn.Module):
         self.kernel_size = kwargs['kernel_size']
         if 'groups' in kwargs: groups = kwargs['groups']
         else: groups = 1
+        self.inplane = inplane
+        self.outplane = outplane
+        self.groups = groups
         self.param_size = inplane * outplane * kernel_size * 1e-6 / groups
         self.filter_size = self.param_size / float(stride ** 2.0)
         self.register_buffer('size_product', torch.tensor(0, dtype=torch.float))
         self.register_buffer('memory_size', torch.tensor(0, dtype=torch.float))
+        self.register_buffer('in_width', torch.tensor(0, dtype=torch.float))
 
     def forward(self, input):
         in_shape = input.shape
@@ -221,6 +225,8 @@ class QuantActivConv2d(nn.Module):
         tmp = torch.tensor(self.filter_size * in_shape[-1] * in_shape[-2], dtype=torch.float)
         self.size_product.copy_(tmp)
         out = self.activ(input)
+        tmp = torch.tensor(input.shape[3], dtype=torch.float)
+        self.in_width.copy_(tmp)
         ## print('ii',input[0,0,:,0]/self.activ.step)
         ## print('convi', torch.round(out[0,0,:,0]/self.activ.step).int())
         ## wstd = self.conv.weight.std()
@@ -363,10 +369,14 @@ class MixActivConv2d(nn.Module):
         
         if 'groups' in kwargs: groups = kwargs['groups']
         else: groups = 1
+        self.inplane = inplane
+        self.outplane = outplane
+        self.groups = groups
         self.param_size = inplane * outplane * kernel_size * 1e-6 / groups
         self.filter_size = self.param_size / float(stride ** 2.0)
         self.register_buffer('size_product', torch.tensor(0, dtype=torch.float))
         self.register_buffer('memory_size', torch.tensor(0, dtype=torch.float))
+        self.register_buffer('in_width', torch.tensor(0, dtype=torch.float))
 
     def forward(self, input):
         in_shape = input.shape
@@ -374,6 +384,8 @@ class MixActivConv2d(nn.Module):
         self.memory_size.copy_(tmp)
         tmp = torch.tensor(self.filter_size * in_shape[-1] * in_shape[-2], dtype=torch.float)
         self.size_product.copy_(tmp)
+        tmp = torch.tensor(input.shape[3], dtype=torch.float)
+        self.in_width.copy_(tmp)
         out = self.mix_activ(input)
         out = self.mix_weight(out)
         return out
@@ -412,7 +424,30 @@ class MixActivConv2d(nn.Module):
                 mix_scale += sw[i] * sa[j] / dsp_factors[wbits[i]-2][abits[j]-2]
         complexity = self.size_product.item() * 64 * mix_scale
         return complexity
+    
+    def bram_loss(self):
+        sa = F.softmax(self.mix_activ.alpha_activ, dim=0)
+        abits = self.mix_activ.bits
+        sw = F.softmax(self.mix_weight.alpha_weight, dim=0)
+        wbits = self.mix_weight.bits
 
+        if self.kernel_size == 1:
+            bram_sw = 2 * self.in_width.item() * self.inplane
+        else: # sliding window size
+            bram_sw = (self.kernel_size+1)*self.in_width.item()*self.inplane
+        bram_sw *= 1e-3
+        
+        mix_wbit, mix_abit = 0, 0
+        for i in range(len(wbits)):
+            mix_wbit += sw[i] * wbits[i]
+        for i in range(len(abits)):
+            mix_abit += sa[i] * abits[i]
+        
+        bram_weight = self.param_size * 1e3 * mix_wbit # kbit
+        bram_cache = bram_sw * mix_abit # kbit
+
+        bram = (bram_weight + bram_cache) * 64
+        return bram
 
     def fetch_best_arch(self, layer_idx):
         size_product = float(self.size_product.cpu().numpy())
@@ -435,9 +470,16 @@ class MixActivConv2d(nn.Module):
             weight_shape = list(self.mix_weight.conv.weight.shape)
         else:
             weight_shape = list(self.mix_weight.conv_list[0].weight.shape)
+    
+        if self.kernel_size == 1:
+            bram_sw = 2 * self.in_width.item() * self.inplane
+        else:
+            bram_sw = (self.kernel_size+1)*self.in_width.item()*self.inplane*self.outplane/self.groups
+        bram_sw *= 1e-3
+
         print('idx {} with shape {}, activ alpha: {}, comp: {:.3f}M * {:.3f} * {:.3f}, '
-              'memory: {:.3f}K * {:.3f}'.format(layer_idx, weight_shape, prob_activ, size_product,
-                                                mix_abit, mix_wbit, memory_size, mix_abit))
+              'memory: {:.3f}K * {:.3f}, cache: {:.3f}K'.format(layer_idx, weight_shape, prob_activ, size_product,
+                                                mix_abit, mix_wbit, memory_size, mix_abit, bram_sw))
         print('idx {} with shape {}, weight alpha: {}, comp: {:.3f}M * {:.3f} * {:.3f}, '
               'param: {:.3f}M * {:.3f}'.format(layer_idx, weight_shape, prob_weight, size_product,
                                                mix_abit, mix_wbit, self.param_size, mix_wbit))
@@ -463,8 +505,10 @@ class MixActivConv2d(nn.Module):
             for j in range(len(abits)):
                 mixdsps += prob_weight[i] * prob_activ[j] / dsp_factors[wbits[i]-2][abits[j]-2]
         mixdsps *= size_product
+        mixbram_weight = self.param_size * 1e3 * mix_wbit # kbit
+        mixbram_cache = bram_sw * mix_abit # kbit
 
-        return best_arch, bitops, bita, bitw, mixbitops, mixbita, mixbitw, dsps, mixdsps
+        return best_arch, bitops, bita, bitw, mixbitops, mixbita, mixbitw, dsps, mixdsps, mixbram_weight, mixbram_cache
 
 
 class SharedMixQuantLinear(nn.Module):
@@ -586,6 +630,6 @@ class MixActivLinear(nn.Module):
         mixdsps = 0
         for i in range(len(wbits)):
             for j in range(len(abits)):
-                mixdsps += prob_weight[i] * prob_activ[j] / dsp_factors[wbits[i]-2][abits[j]-2]
+                mixdsps += prob_weight[i] * prob_activ[j] / dsp_factors_k11[wbits[i]-2][abits[j]-2]
         mixdsps *= size_product
         return best_arch, bitops, bita, bitw, mixbitops, mixbita, mixbitw, dsps, mixdsps
