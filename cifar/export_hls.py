@@ -98,7 +98,7 @@ def extract_model(in_shape):
             assert sub_module.bias is None, 'inner conv has no bias in this model'
             if isinstance(sub_module, QuantConv2d): # New quant
                 conv_cur.wbit = sub_module.bit
-                conv_cur.w, conv_cur.wstep = sub_module.export_quant() # wstep is not QuantConv2d.step becuause of alpha
+                conv_cur.w, conv_cur.wstep = sub_module.export_quant() # wstep is not QuantConv2d.step because of alpha
             else:
                 raise NotImplementedError(sub_module)
             print(', ich {ich}, och {och}, irow {irow}, icol {icol}, ksp {k}{s}{p}, wbit {wbit}, wstep {wstep}'.format(**vars(conv_cur)))
@@ -124,7 +124,7 @@ def extract_model(in_shape):
             
             if isinstance(sub_module, QuantLinear): # New quant
                 conv_cur.wbit = sub_module.bit
-                conv_cur.w, conv_cur.wstep = sub_module.export_quant() # wstep is not QuantLinear.step becuause of alpha
+                conv_cur.w, conv_cur.wstep = sub_module.export_quant() # wstep is not QuantLinear.step because of alpha
 
             print(', ich {ich}, och {och}, wbit {wbit}, wstep {wstep}'.format(**vars(conv_cur)))
             
@@ -388,7 +388,7 @@ if __name__=='__main__':
     # load model and state_dict
     ptfile:Dict = torch.load('weights/' + opt.weight + '.pt', map_location='cpu')
     model = getattr(models, opt.model)(**ptfile.setdefault('model_params', {}))
-    model.load_state_dict(ptfile['model'])
+    model.load_state_dict(ptfile['model'], strict = False)
 
     # processs
     model_param = extract_model([1, 32, 32])

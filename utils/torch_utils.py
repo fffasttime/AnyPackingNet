@@ -93,3 +93,19 @@ def load_classifier(name='resnet101', n=2):
     model.last_linear.weight = torch.nn.Parameter(torch.zeros(n, filters))
     model.last_linear.out_features = n
     return model
+
+log_layerid = 0
+def loglayer(x):
+    global log_layerid
+    import numpy as np
+    x=x.numpy()
+    assert x.dtype == np.int
+    with open('_logs/test%d.txt'%log_layerid, 'w') as f:
+        for i in range(x.shape[0]):
+            print('C', i, file=f)
+            for j in range(x.shape[1]):
+                for k in range(x.shape[2]):
+                    print('%3d'%x[i,j,k], end=',', file=f)
+                print(file=f)
+
+    log_layerid+=1

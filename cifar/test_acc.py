@@ -68,7 +68,7 @@ if __name__ == '__main__':
     ptfile: Dict = torch.load('weights/' + opt.weight+'.pt', map_location=device)
     model_params = ptfile.setdefault('model_params', {})
     model = getattr(models, opt.model)(**model_params).to(device)
-    model.load_state_dict(ptfile['model'])
+    model.load_state_dict(ptfile['model'], strict = False)
 
     # Test
     res = test(model, device, batch_size=opt.batch_size, num_batch=opt.num_batch)

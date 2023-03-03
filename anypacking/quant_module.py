@@ -252,7 +252,11 @@ class QuantActivLinear(nn.Module):
         tmp = torch.tensor(input.shape[1] * 1e-3, dtype=torch.float)
         self.memory_size.copy_(tmp)
         out = self.activ(input)
+        ## print('ii',input[0,0,:,0]/self.activ.step)
+        ## print('lineari', torch.round(out[0,:]/self.activ.step).int())
+        ## wstd = self.linear.weight.std()
         out = self.linear(out)
+        ## print('linearo', torch.round(out[0,:]/(self.activ.step*self.linear.step*wstd)).int())
         return out
 
 

@@ -13,8 +13,8 @@ class QConvLayer:
         self.conv = conv_param
         self.w = torch.tensor(self.conv.w, dtype = torch.int64)
     
-    def __call__(self, x: torch.Tensor):
-        if self.conv.icol < x.shape[-1]: # maxpool
+    def __call__(self, x: torch.Tensor, downsampling):
+        if self.conv.icol < x.shape[-1]: # Maxpool. Note: Order of Maxpool and BN is IMPORTANT when BN.inc can be negative
             assert self.conv.irow*2, self.conv.icol*2 == x.shape[2:]
             x = F.max_pool2d(x.float(), kernel_size = 2, stride = 2).to(dtype=torch.int64)
 
@@ -27,6 +27,8 @@ class QConvLayer:
 
         x = F.conv2d(x, self.w, bias=None, stride=self.conv.s, padding=self.conv.p) # [N, OCH, OROW, OCOL]
         # print('convo', self.conv.n, x[0,0,:,:])
+        #if downsampling: # Maxpool
+        #    x = F.max_pool2d(x.float(), kernel_size = 2, stride = 2).to(dtype=torch.int64)
         och = x.shape[1]
         if True:
             if self.conv.inc is not None:
@@ -48,13 +50,11 @@ class QConvLayer:
             if hasattr(self.conv, 'bias'):
                 bias_ch = self.conv.bias_raw.reshape((1, och, 1, 1))
                 x += bias_ch
-
             # print('biaso', self.conv.n, x[0,0,:,:])
             x = torch.round(x).to(dtype = torch.int64)
         
         if hasattr(self.conv, 'obit'):
             x.clip_(0, 2**(self.conv.obit)-1)
-
         return x
 
 class HWModel:
@@ -69,7 +69,7 @@ class HWModel:
             x=x>>(8-self.layers[0].conv.abit) 
 
         for i, layer in enumerate(self.layers):
-            x = layer(x)
+            x = layer(x, self.layers[i+1].conv.icol<layer.conv.icol if i+1<len(self.layers) else False)
         
         x = x.float() / self.layers[-1].conv.div
         return x

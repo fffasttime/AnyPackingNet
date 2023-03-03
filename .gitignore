@@ -9,3 +9,4 @@ results
 !*/hls/config_simd_pe.txt
 localconfig.py
 /*.txt
+_logs
