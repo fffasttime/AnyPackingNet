@@ -152,6 +152,17 @@ def mixq_bram_loss(self):
     loss /= normalizer
     return loss
 
+def mixq_complexity_loss_trivial(self):
+    size_product = []
+    loss = 0
+    for m in self.modules():
+        if isinstance(m, self.conv_func):
+            loss += m.complexity_loss_trivial()
+            size_product += [m.size_product]
+    normalizer = size_product[0].item()
+    loss /= normalizer
+    return loss
+
 class UltraNet_ismart(nn.Module):
     def __init__(self):
         super(UltraNet_ismart, self).__init__()
@@ -367,7 +378,8 @@ class UltraNet_MixQ(nn.Module):
     fetch_best_arch = mixq_fetch_best_arch
 
     # def complexity_loss(self):
-    complexity_loss= mixq_complexity_loss
+    complexity_loss = mixq_complexity_loss
+    complexity_loss_trivial = mixq_complexity_loss_trivial
     bram_loss = mixq_bram_loss
 
 class UltraNet_FixQ(nn.Module):
@@ -685,7 +697,8 @@ class UltraNetBypass_MixQ(nn.Module):
     fetch_best_arch = mixq_fetch_best_arch
 
     # def complexity_loss(self):
-    complexity_loss= mixq_complexity_loss
+    complexity_loss = mixq_complexity_loss
+    mixq_complexity_loss_trivial = mixq_complexity_loss_trivial
     bram_loss = mixq_bram_loss
 
 class UltraNetBypass_FixQ(nn.Module):
@@ -876,7 +889,8 @@ class SkyNet_MixQ(nn.Module):
     fetch_best_arch = mixq_fetch_best_arch
 
     # def complexity_loss(self):
-    complexity_loss= mixq_complexity_loss
+    complexity_loss = mixq_complexity_loss
+    mixq_complexity_loss_trivial = mixq_complexity_loss_trivial
     bram_loss = mixq_bram_loss
 
 class SkyNetk5_MixQ(nn.Module):

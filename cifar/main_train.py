@@ -105,22 +105,36 @@ def train():
     
     print('Finished Training')
 
+    with open('results.csv', 'a') as f:
+        print("fixed,%s,%d/%d, , ,%s,%s,%.1f,%.1f, , , ,%d, ,%.3f, "%
+              (opt.name,epochs-1,epochs,opt.bitw,opt.bita,macc*100,(test_acc+test_best_acc)/2,
+               int(round(bops)), dsps), file=f)
+
     # torch.save(net.state_dict(), 'lenet_cifar10.pth')
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-n', '--name', default='VGG_tiny_FixQ', help='result and weight file name')
     parser.add_argument('-w', '--weights', default=None, help='weights path')
-    parser.add_argument('-e', '--epochs', type=int, default=40) 
+    parser.add_argument('-e', '--epochs', type=int, default=200) 
     parser.add_argument('--batch-size', type=int, default=128) 
     parser.add_argument('--bypass', action='store_true', help='use bypass model')
     parser.add_argument('--device', default='', help='device id (i.e. 0 or 0,1 or cpu)')
     parser.add_argument('--lr', type=float, default=0.03)
+    parser.add_argument('--mixm', type=str)
     parser.add_argument('--bitw', type=str, default='')
     parser.add_argument('--bita', type=str, default='')
 
     opt = parser.parse_args()
+
+    if opt.mixm is not None:
+        wmix = torch.load('weights/%s.pt'%opt.mixm)
+        opt.bitw = wmix['extra']['bestw']
+        opt.bita = wmix['extra']['besta']
+        del wmix
+
     print(opt)
+
     wdir = 'weights' + os.sep  # weights dir
     last = wdir + '%s_last.pt'%opt.name
 

@@ -239,16 +239,15 @@ def train():
 
             # complexity penalty
             if opt.complexity_decay != 0:
-                if hasattr(model, 'module'):
-                    loss_complexity = opt.complexity_decay * model.module.complexity_loss()
-                else:
-                    loss_complexity = opt.complexity_decay * model.complexity_loss()
+                loss_complexity = opt.complexity_decay * model.complexity_loss()
                 loss += loss_complexity * 4.0
+
+            if opt.complexity_decay_trivial != 0:
+                loss_complexity_trivial = opt.complexity_decay_trivial * model.complexity_loss_trivial()
+                loss += loss_complexity_trivial * 4.0
             
             if opt.bram_decay != 0:
                 if hasattr(model, 'module'):
-                    loss_bram = opt.bram_decay * model.module.bram_loss()
-                else:
                     loss_bram = opt.bram_decay * model.bram_loss()
                 loss += loss_bram * 4.0
 
@@ -278,12 +277,17 @@ def train():
             bitops, bita, bitw, dsps))
         print('expected model with bitops: {:.3f}M, bita: {:.3f}K, bitw: {:.3f}M, dsps: {:.3f}M, bram_wa:({:.3f},{:.3f})K'.format(
             mixbitops, mixbita, mixbitw, mixdsps, mixbram_weight, mixbram_cache))
-        print(f'best_weight: {best_arch["best_weight"]}  ({"".join([str(x+2) for x in best_arch["best_weight"]])})')
-        print(f'best_activ: {best_arch["best_activ"]}  ({"".join([str(x+2) for x in best_arch["best_activ"]])})')
-            
+        
+        bestw_str = "".join([str(x+2) for x in best_arch["best_weight"]])
+        besta_str = "".join([str(x+2) for x in best_arch["best_activ"]])
+        print(f'best_weight: {best_arch["best_weight"]}')
+        print(f'best_activ: {best_arch["best_activ"]}')
+
         # Update scheduler
         scheduler.step()
         arch_scheduler.step()
+
+        train_iou = mloss[2]
 
         # Process epoch results
         final_epoch = epoch + 1 == epochs
@@ -314,7 +318,7 @@ def train():
                          'model': model.module.state_dict() if type(
                              model) is nn.parallel.DistributedDataParallel else model.state_dict(),
                          'optimizer': None if final_epoch else optimizer.state_dict(),
-                         'extra': {'time': time.ctime(), 'name': opt.name}}
+                         'extra': {'time': time.ctime(), 'name': opt.name, 'bestw': bestw_str, 'besta': besta_str}}
 
             # Save last checkpoint
             torch.save(chkpt, wdir + '%s_last.pt'%opt.name)
@@ -333,6 +337,12 @@ def train():
     print('%g epochs completed in %.3f hours.\n' % (epoch - start_epoch + 1, (time.time() - t0) / 3600))
     dist.destroy_process_group() if torch.cuda.device_count() > 1 else None
     torch.cuda.empty_cache()
+    
+    with open('results.csv', 'a') as f:
+        print("mixed,%s,%d/%d, , , , ,%.1f,%.1f, ,%s,%s,%d,%d,%.3f,%.3f"%
+              (opt.name,epochs-1,epochs,train_iou*100,(test_iou+test_best_iou)*50,
+               bestw_str,besta_str,
+               int(round(bitops)), int(round(mixbitops)), dsps, mixdsps), file=f)
 
     return results
 
@@ -359,6 +369,7 @@ if __name__ == '__main__':
     parser.add_argument('--single-cls', action='store_true', help='train as single-class dataset')
     parser.add_argument('--var', type=float, help='debug variable')
     parser.add_argument('--complexity-decay', '--cd', default=0, type=float, metavar='W', help='complexity decay (default: 0)')
+    parser.add_argument('--complexity-decay-trivial', '--cdt', default=0, type=float, metavar='W', help='complexity decay (default: 0)')
     parser.add_argument('--bram-decay', '--bd', default=0, type=float, metavar='W', help='complexity decay (default: 0)')
     parser.add_argument('--lra', '--learning-rate-alpha', default=0.01, type=float, metavar='LR', help='initial alpha learning rate')
     parser.add_argument('--no-share', action='store_true', help='no share weight quantization')

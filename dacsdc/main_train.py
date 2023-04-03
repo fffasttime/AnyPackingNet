@@ -244,6 +244,8 @@ def train():
         # Update scheduler
         scheduler.step()
 
+        train_iou = mloss[2]
+
         # Process epoch results
         final_epoch = epoch + 1 == epochs
         if not opt.notest or final_epoch:  # Calculate mAP
@@ -293,6 +295,11 @@ def train():
     print('%g epochs completed in %.3f hours.\n' % (epoch - start_epoch + 1, (time.time() - t0) / 3600))
     dist.destroy_process_group() if torch.cuda.device_count() > 1 else None
     torch.cuda.empty_cache()
+    
+    with open('results.csv', 'a') as f:
+        print("fixed,%s,%d/%d, , ,%s,%s,%.1f,%.1f, , , ,%d, ,%.3f, "%
+              (opt.name,epochs-1,epochs,opt.bitw,opt.bita,train_iou*100,(test_iou+test_best_iou)*50,
+               int(round(bops)), dsps), file=f)
 
     return results
 
@@ -317,12 +324,19 @@ if __name__ == '__main__':
     parser.add_argument('--device', default='', help='device id (i.e. 0 or 0,1 or cpu)')
     parser.add_argument('--adam', action='store_true', help='use adam optimizer')
     parser.add_argument('--single-cls', action='store_true', help='train as single-class dataset')
+    parser.add_argument('--mixm', type=str)
     parser.add_argument('--bitw', type=str, default='')
     parser.add_argument('--bita', type=str, default='')
     parser.add_argument('--var', type=float, help='debug variable')
     parser.add_argument('--model', type=str, default='', help='use specific model')
   
     opt = parser.parse_args()
+    
+    if opt.mixm is not None:
+        wmix = torch.load('weights/%s.pt'%opt.mixm)
+        opt.bitw = wmix['extra']['bestw']
+        opt.bita = wmix['extra']['besta']
+        del wmix
     last = wdir + 'last_%s.pt'%opt.name
     opt.weights = last if opt.resume else opt.weights
     print(opt)

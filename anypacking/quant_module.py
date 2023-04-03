@@ -5,39 +5,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.parameter import Parameter
 
+# load dsp packing factors
+from .dsp_packing import *
+
 gaussian_steps = {1: 1.596, 2: 0.996, 3: 0.586, 4: 0.336, 5: 0.190, 6: 0.106, 7: 0.059, 8: 0.032}
 hwgq_steps = {1: 0.799, 2: 0.538, 3: 0.3217, 4: 0.185, 5: 0.104, 6: 0.058, 7: 0.033, 8: 0.019}
-
-
-dsp_factors_k11=[
-[12,8,8,6,6,4,4],
-[10,8,6,6,4,4,4],
-[8,6,6,4,4,4,3],
-[6,6,4,4,4,4,2],
-[6,4,4,4,2,2,2],
-[4,4,4,4,2,2,2],
-[4,4,3,2,2,2,2],
-]
-
-dsp_factors_k33=[
-[18,15,12,7.5,7.5,6,6],
-[15,12,7.5,6,6,6,3],
-[12,7.5,6,6,6,6,3],
-[9,6,6,6,6,3,3],
-[7.5,6,6,4.5,3,3,3],
-[6,6,4.5,3,3,3,2.25],
-[6,3,3,3,3,3,2],
-]
-
-dsp_factors_k55=[
-[20,15,10,7.5,7.5,5,5],
-[12.5,10,6.67,5,5,5,3.33],
-[10,7.5,5,5,5,5,3.33],
-[7.5,6.67,5,5,5,3.33,3.33],
-[6.67,5,5,5,3.33,2.5,2.5],
-[5,5,5,3.33,2.5,2.5,2.5],
-[5,3.33,3.33,3.33,2.5,2.5,2],
-]
 
 class _gauss_quantize_sym(torch.autograd.Function):
 
@@ -394,7 +366,7 @@ class MixActivConv2d(nn.Module):
         out = self.mix_weight(out)
         return out
 
-    def complexity_loss_old(self):
+    def complexity_loss_trivial(self):
         sw = F.softmax(self.mix_activ.alpha_activ, dim=0)
         mix_abit = 0
         abits = self.mix_activ.bits
@@ -416,16 +388,16 @@ class MixActivConv2d(nn.Module):
         wbits = self.mix_weight.bits
 
         if self.kernel_size == 1:
-            dsp_factors = dsp_factors_k11
+            factors = factors_k11
         elif self.kernel_size == 3:
-            dsp_factors = dsp_factors_k33
+            factors = factors_k33
         elif self.kernel_size == 5:
-            dsp_factors = dsp_factors_k55
+            factors = factors_k55
         else:
             raise NotImplementedError
         for i in range(len(wbits)):
             for j in range(len(abits)):
-                mix_scale += sw[i] * sa[j] / dsp_factors[wbits[i]-2][abits[j]-2]
+                mix_scale += sw[i] * sa[j] / factors[wbits[i]-2][abits[j]-2]
         complexity = self.size_product.item() * 64 * mix_scale
         return complexity
     
@@ -493,21 +465,21 @@ class MixActivConv2d(nn.Module):
         bitw = self.param_size * wbits[best_weight]
         
         if self.kernel_size == 1:
-            dsp_factors = dsp_factors_k11
+            factors = factors_k11
         elif self.kernel_size == 3:
-            dsp_factors = dsp_factors_k33
+            factors = factors_k33
         elif self.kernel_size == 5:
-            dsp_factors = dsp_factors_k55
+            factors = factors_k55
         else:
             raise NotImplementedError
-        dsps = size_product / dsp_factors[wbits[best_weight]-2][abits[best_activ]-2]
+        dsps = size_product / factors[wbits[best_weight]-2][abits[best_activ]-2]
         mixbitops = size_product * mix_abit * mix_wbit
         mixbita = memory_size * mix_abit
         mixbitw = self.param_size * mix_wbit
         mixdsps = 0
         for i in range(len(wbits)):
             for j in range(len(abits)):
-                mixdsps += prob_weight[i] * prob_activ[j] / dsp_factors[wbits[i]-2][abits[j]-2]
+                mixdsps += prob_weight[i] * prob_activ[j] / factors[wbits[i]-2][abits[j]-2]
         mixdsps *= size_product
         mixbram_weight = self.param_size * 1e3 * mix_wbit # kbit
         mixbram_cache = bram_sw * mix_abit # kbit
@@ -595,7 +567,7 @@ class MixActivLinear(nn.Module):
         wbits = self.mix_weight.bits
         for i in range(len(wbits)):
             for j in range(len(abits)):
-                mix_scale += sw[i] * sa[j] / dsp_factors_k11[wbits[i]-2][abits[j]-2]
+                mix_scale += sw[i] * sa[j] / factors_k11[wbits[i]-2][abits[j]-2]
         complexity = self.size_product.item() * 64 * mix_scale
         return complexity
 
@@ -627,13 +599,13 @@ class MixActivLinear(nn.Module):
         bitops = size_product * abits[best_activ] * wbits[best_weight]
         bita = memory_size * abits[best_activ]
         bitw = self.param_size * wbits[best_weight]
-        dsps = size_product / dsp_factors_k11[wbits[best_weight]-2][abits[best_activ]-2]
+        dsps = size_product / factors_k11[wbits[best_weight]-2][abits[best_activ]-2]
         mixbitops = size_product * mix_abit * mix_wbit
         mixbita = memory_size * mix_abit
         mixbitw = self.param_size * mix_wbit
         mixdsps = 0
         for i in range(len(wbits)):
             for j in range(len(abits)):
-                mixdsps += prob_weight[i] * prob_activ[j] / dsp_factors_k11[wbits[i]-2][abits[j]-2]
+                mixdsps += prob_weight[i] * prob_activ[j] / factors_k11[wbits[i]-2][abits[j]-2]
         mixdsps *= size_product
         return best_arch, bitops, bita, bitw, mixbitops, mixbita, mixbitw, dsps, mixdsps

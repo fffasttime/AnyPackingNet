@@ -75,8 +75,9 @@ def train():
             correct = (predicted == labels).sum().item()
             loss = criterion(outputs, labels)
             
-            if opt.complexity_decay != 0:
-                loss_complexity = opt.complexity_decay * model.complexity_loss()
+            if opt.complexity_decay != 0 or opt.complexity_decay_trivial!=0:
+                loss_complexity = opt.complexity_decay * model.complexity_loss() + \
+                                  opt.complexity_decay_trivial * model.complexity_loss_trivial()
                 loss += loss_complexity
 
             loss.backward()
@@ -94,6 +95,8 @@ def train():
             bitops, bita, bitw, dsps))
         print('expected model with bitops: {:.3f}M, bita: {:.3f}K, bitw: {:.3f}M, dsps: {:.3f}M'.format(
             mixbitops, mixbita, mixbitw, mixdsps))
+        bestw_str = "".join([str(x+2) for x in best_arch["best_weight"]])
+        besta_str = "".join([str(x+2) for x in best_arch["best_activ"]])
         print(f'best_weight: {best_arch["best_weight"]}')
         print(f'best_activ: {best_arch["best_activ"]}')
         
@@ -115,7 +118,7 @@ def train():
                                 model) is nn.parallel.DistributedDataParallel else model.state_dict(),
                             'optimizer': None if final_epoch else optimizer.state_dict(),
                             'arch_optimizer': None if final_epoch else arch_optimizer.state_dict(),
-                            'extra': {'time': time.ctime(), 'name': opt.name}}
+                            'extra': {'time': time.ctime(), 'name': opt.name, 'bestw': bestw_str, 'besta': besta_str}}
             # Save last checkpoint
             torch.save(chkpt, wdir + '%s_last.pt'%opt.name)
             
@@ -123,6 +126,12 @@ def train():
                 torch.save(chkpt, wdir + '%s_best.pt'%opt.name)
     
     print('Finished Training')
+
+    with open('results.csv', 'a') as f:
+        print("mixed,%s,%d/%d, , , , ,%.1f,%.1f, ,%s,%s,%d,%d,%.3f,%.3f"%
+              (opt.name,epochs-1,epochs,macc*100,(test_acc+test_best_acc)/2,
+               bestw_str,besta_str,
+               int(round(bitops)), int(round(mixbitops)), dsps, mixdsps), file=f)
 
     # torch.save(net.state_dict(), 'lenet_cifar10.pth')
 
@@ -135,6 +144,7 @@ if __name__ == '__main__':
     parser.add_argument('--name', default='', help='result and weight file name')
     parser.add_argument('--noshare', action='store_true', help='no share weight')
     parser.add_argument('--complexity-decay', '--cd', default=0, type=float, metavar='W', help='complexity decay (default: 0)')
+    parser.add_argument('--complexity-decay-trivial', '--cdt', default=0, type=float, metavar='W', help='complexity decay w/o hardware-aware')
     parser.add_argument('--lra', '--learning-rate-alpha', default=0.1, type=float, metavar='LR', help='initial alpha learning rate')
 
     opt = parser.parse_args()
