@@ -1,9 +1,8 @@
-# AnyPackingNet
+# AnyPacking Serach & Train & Export
 
-This is the training model source code of the paper: 
+This is the training model source code for NAS packing.
 
-Mixed-precision Neural Network Quantization and
-Implementation Co-optimization for FPGAs
+Our paper is under submission.
 
 ## Classification Model
 
@@ -123,4 +122,4 @@ python simulate_hls.py [--model [UltraNet_Bypass_FixQ | SkyNet_FixQ | SkyNetk5_F
 - https://github.com/xliu0709/DACSDC2021 iSmart team, 2nd place of 2021 DAC-SDC design, UltraNet with optimized packing method
 - https://github.com/heymesut/SJTU_microe 3rd place of 2021 DAC-SDC design by SJTU, a variant of UltraNet with bypass
 - https://github.com/jgoeders/dac_sdc_2022_designs Winner designs of 2022 DAC-SDC contest
-- https://github.com/MatthewLuo7/InvolutionNet 3rd place of 2022 DAC-SDC design (ours), without anypacking design
+- https://github.com/MatthewLuo7/InvolutionNet 3rd place of 2022 DAC-SDC design, without anypacking design
