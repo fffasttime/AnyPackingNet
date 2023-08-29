@@ -1,10 +1,10 @@
 # DeepBurning-MixQ
 
-The project is part of the DeepBurning project developed for agile neural network accelerator design. It focuses on the software/hardware co-optimization of FPGA-based accelerators for low bit width mixed precision deep learning models. In terms of hardware, we mainly explore the packaging methods of various low bit width convolution operators, so that each FPGA DSP unit can accommodate as many low bit width operations as possible, thereby improving DSP utilization. In terms of the model, we mainly utilize differential NAS(Network Architecture Search) technique to perform mixed precision quantization on the given model, while also considering the hardware implementation efficiency of the quantized model, in order to efficiently deploy the target convolutional neural network model onto FPGA under given resource constraints.
+This is part of the DeepBurning project developed for agile neural network accelerator design in Institute of Computing Technology, Chinese Academy of Sciences. It focuses on the software/hardware co-optimization of FPGA-based accelerators for low bit-width mixed-precision neural network models. In terms of hardware, we mainly explore the packing method of various low bit-width convolution operators, so that each primitive DSP in FPGAs can accommodate as many low bit-width operations as possible, thereby improving DSP utilization. In terms of the model, we mainly utilize differential NAS (Network Architecture Search) technique to perform mixed-precision quantization on the given model, while also considering the hardware implementation efficiency of the quantized model, in order to efficiently deploy the target convolutional neural network model onto FPGA under given resource constraints.
 
 This work will appear in ICCAD'23 and please refer to the paper for more details. 
 
-Erjing Luo, Haitong Huang, Cheng Liu*, Guoyu Li, Bing Yang, Ying Wang, Huawei Li, Xiaowei Li, "DeepBurning-MixQ: An Open Source Mixed-Precision Neural Network Accelerator Design Framework for FPGAs", ICCAD, 2023
+Erjing Luo#, Haitong Huang#, Cheng Liu*, Guoyu Li, Bing Yang, Ying Wang, Huawei Li, Xiaowei Li, "DeepBurning-MixQ: An Open Source Mixed-Precision Neural Network Accelerator Design Framework for FPGAs", ICCAD, 2023. (# equal contribution)
 
 ## Classification Model
 
