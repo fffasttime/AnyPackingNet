@@ -130,3 +130,9 @@ python simulate_hls.py [--model [UltraNet_Bypass_FixQ | SkyNet_FixQ | SkyNetk5_F
 - https://github.com/heymesut/SJTU_microe 3rd place of 2021 DAC-SDC design by SJTU, a variant of UltraNet with bypass
 - https://github.com/jgoeders/dac_sdc_2022_designs Winner designs of 2022 DAC-SDC contest
 - https://github.com/MatthewLuo7/InvolutionNet 3rd place of 2022 DAC-SDC design (ours), without anypacking design
+
+## License
+
+![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
